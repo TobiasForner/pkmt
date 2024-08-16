@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 
 use crate::document_component::{collapse_text, DocumentComponent, DocumentElement};
@@ -30,7 +32,7 @@ enum ObsidianToken {
     // Or regular expressions.
     #[regex("[-a-zA-Z_]+")]
     Name,
-    #[regex("[.{}^$><,0-9():=*&/;'+]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?]+")]
     MiscText,
     #[token("\\")]
     Backslash,
@@ -126,7 +128,22 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
     let mut text = String::new();
     while let Some(Ok(token)) = lexer.next() {
         match token {
-            ObsidianToken::TripleBackQuote => return Ok(DocumentElement::Admonition(text)),
+            ObsidianToken::TripleBackQuote => {
+                let text = text.trim_start_matches("\n").trim_end_matches("\n");
+                let mut properties = HashMap::new();
+                let mut body_lines = vec![];
+                // parse additional properties
+                for line in text.lines() {
+                    if line.starts_with("title: ") {
+                        let remainder = line.strip_prefix("title: ").unwrap();
+                        properties.insert("title".to_string(), remainder.trim().to_string());
+                    } else {
+                        body_lines.push(line);
+                    }
+                }
+                let text = body_lines.join("\n");
+                return Ok(DocumentElement::Admonition(text, properties));
+            }
             other => {
                 let txt = lexer.slice();
                 println!("adnote: {other:?} ({txt})");
@@ -180,4 +197,28 @@ fn parse_file_link(
         }
     }
     bail!("Failed to parse file link!")
+}
+
+#[test]
+fn test_admonition() {
+    let text = "```ad-note
+title: Title
+Some text with $x+1$ math...
+A new line!
+```";
+
+    let res = parse_obsidian(text);
+    if let Ok(res) = res {
+        let mut props = HashMap::new();
+        props.insert("title".to_string(), "Title".to_string());
+        let expected = vec![DocumentComponent::new(
+            crate::obsidian_parsing::DocumentElement::Admonition(
+                "Some text with $x+1$ math...\nA new line!".to_string(),
+                props,
+            ),
+        )];
+        assert_eq!(res, expected);
+    } else {
+        assert!(false, "Got {res:?}")
+    }
 }

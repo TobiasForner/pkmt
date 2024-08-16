@@ -1,11 +1,14 @@
-#[derive(Clone, Debug)]
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DocumentElement {
     Heading(u16, String),
     /// file, optional section, optional rename
     FileLink(String, Option<String>, Option<String>),
     FileEmbed(String, Option<String>),
     Text(String),
-    Admonition(String),
+    /// text, map storing additional properties
+    Admonition(String, HashMap<String, String>),
 }
 
 impl DocumentElement {
@@ -19,15 +22,15 @@ impl DocumentElement {
     fn obsidian_to_logseq(&self) -> Self {
         use DocumentElement::*;
         match self {
-            Admonition(s) => {
-                todo!("Parse internal information: convert title and remove color")
+            Admonition(s, props) => {
+                todo!("convert to logseq")
             }
             _ => todo!("handle other element types"),
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentComponent {
     element: DocumentElement,
     children: Vec<Self>,
