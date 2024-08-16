@@ -19,13 +19,26 @@ impl DocumentElement {
         }
     }
 
-    fn obsidian_to_logseq(&self) -> Self {
+    fn to_logseq_text(&self) -> String {
         use DocumentElement::*;
         match self {
-            Admonition(s, props) => {
-                todo!("convert to logseq")
+            Heading(level, title) => {
+                let hashes = "#".repeat(*level as usize).to_string();
+                format!("- {hashes} {title}")
             }
-            _ => todo!("handle other element types"),
+            // todo use other parsed properties
+            FileLink(file, _, _) => format!("[[{file}]]"),
+            FileEmbed(file, _) => format!("{{embed [[{file}]]}}"),
+            Text(text) => text.clone(),
+            Admonition(s, props) => {
+                let mut parts = vec!["#+BEGIN_QUOTE".to_string()];
+                if let Some(title) = props.get("title") {
+                    parts.push(format!("**{title}**"));
+                }
+                parts.push(s.to_string());
+                parts.push("#+END_QUOTE".to_string());
+                parts.join("\n")
+            }
         }
     }
 }
@@ -37,6 +50,17 @@ pub struct DocumentComponent {
 }
 
 impl DocumentComponent {
+    fn to_logseq_text(&self) -> String {
+        [self.element.to_logseq_text()]
+            .into_iter()
+            .chain(self.children.iter().map(|c| {
+                c.to_logseq_text()
+                    .lines()
+                    .map(|line| format!("\t{line}"))
+                    .collect::<String>()
+            }))
+            .collect()
+    }
     pub fn new(element: DocumentElement) -> Self {
         Self {
             element,
