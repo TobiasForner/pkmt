@@ -23,12 +23,13 @@ impl DocumentElement {
         use DocumentElement::*;
         match self {
             Heading(level, title) => {
+                let title = title.trim();
                 let hashes = "#".repeat(*level as usize).to_string();
                 format!("- {hashes} {title}")
             }
             // todo use other parsed properties
             FileLink(file, _, _) => format!("[[{file}]]"),
-            FileEmbed(file, _) => format!("{{embed [[{file}]]}}"),
+            FileEmbed(file, _) => format!("{{{{embed [[{file}]]}}}}"),
             Text(text) => text.clone(),
             Admonition(s, props) => {
                 let mut parts = vec!["#+BEGIN_QUOTE".to_string()];
@@ -50,7 +51,7 @@ pub struct DocumentComponent {
 }
 
 impl DocumentComponent {
-    fn to_logseq_text(&self) -> String {
+    pub fn to_logseq_text(&self) -> String {
         [self.element.to_logseq_text()]
             .into_iter()
             .chain(self.children.iter().map(|c| {

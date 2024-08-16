@@ -148,9 +148,9 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
                 let text = body_lines.join("\n");
                 return Ok(DocumentElement::Admonition(text, properties));
             }
-            other => {
+            _ => {
                 let txt = lexer.slice();
-                println!("adnote: {other:?} ({txt}), {:?}", lexer.span());
+                // println!("adnote: {other:?} ({txt}), {:?}", lexer.span());
                 text.push_str(txt)
             }
         }

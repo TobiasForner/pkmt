@@ -29,6 +29,10 @@ fn main() {
         _ => panic!("Unsupported mode: {mode}"),
     };
     println!("{res:?}");
+    if let Ok(components) = res {
+        let text: Vec<String> = components.iter().map(|c| c.to_logseq_text()).collect();
+        println!("{}", text.join("\n"));
+    }
 }
 
 fn apply_substitutions(text: &str) -> String {
