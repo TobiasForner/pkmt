@@ -99,7 +99,11 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                 MiscText => res.push(DocumentComponent::new_text(lexer.slice())),
                 _ => todo!("Support missing token types: {token:?}"),
             },
-            Err(e) => panic!("Error: {e:?};"),
+            Err(e) => panic!(
+                "Error: {e:?}! Encountered '{}' at {:?};",
+                lexer.slice(),
+                lexer.span()
+            ),
         }
     }
     let res = collapse_text(&res);
@@ -146,12 +150,16 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
             }
             other => {
                 let txt = lexer.slice();
-                println!("adnote: {other:?} ({txt})");
+                println!("adnote: {other:?} ({txt}), {:?}", lexer.span());
                 text.push_str(txt)
             }
         }
     }
-    bail!("Failed to parse adnote!")
+    bail!(
+        "Failed to parse adnote: Could not match '{}' at positions {:?}",
+        lexer.slice(),
+        lexer.span()
+    )
 }
 
 fn parse_file_link(
