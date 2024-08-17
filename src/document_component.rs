@@ -21,6 +21,8 @@ impl DocumentElement {
 
     fn to_logseq_text(&self) -> String {
         use DocumentElement::*;
+        let mut tmp = self.clone();
+        tmp.cleanup();
         match self {
             Heading(level, title) => {
                 let title = title.trim();
@@ -41,6 +43,37 @@ impl DocumentElement {
                 parts.join("\n")
             }
         }
+    }
+
+    fn cleanup(&mut self) {
+        use DocumentElement::*;
+        match self {
+            Heading(_, text) => *text = text.trim().to_string(),
+            FileLink(file, _, _) => *file = file.trim().to_string(),
+            FileEmbed(file, _) => *file = file.trim().to_string(),
+            Text(text) => {
+                *text = DocumentElement::cleanup_text(&text);
+            }
+            Admonition(text, _) => {
+                *text = DocumentElement::cleanup_text(&text);
+            }
+        }
+    }
+
+    fn cleanup_text(text: &str) -> String {
+        let mut lines = vec![];
+        let mut last_was_empty = false;
+        text.trim().lines().for_each(|l| {
+            if l.trim().is_empty() {
+                last_was_empty = true;
+            } else {
+                if last_was_empty {
+                    lines.push("");
+                }
+                lines.push(l);
+            }
+        });
+        lines.join("\n")
     }
 }
 
