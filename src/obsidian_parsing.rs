@@ -25,14 +25,20 @@ enum ObsidianToken {
     ClosingDoubleBraces,
     #[regex("[ \t]+")]
     Space,
-    #[token("\n")]
+    #[regex("\n\r?")]
     Newline,
+    #[regex("\r")]
+    CarriageReturn,
     #[token("|")]
     Pipe,
+    #[token("[")]
+    Bracket,
+    #[token("]")]
+    ClosingBracket,
     // Or regular expressions.
     #[regex("[-a-zA-Z_]+")]
     Name,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"]+")]
     MiscText,
     #[token("\\")]
     Backslash,
@@ -83,6 +89,12 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                 Pipe => {
                     res.push(DocumentComponent::new_text("|"));
                 }
+                Bracket => {
+                    res.push(DocumentComponent::new_text("["));
+                }
+                ClosingBracket => {
+                    res.push(DocumentComponent::new_text("]"));
+                }
                 Backslash => {
                     res.push(DocumentComponent::new_text("\\"));
                 }
@@ -93,21 +105,30 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                             name, section, rename,
                         )));
                     } else {
-                        panic!("Something went wrong when trying to parse file link: {parsed:?}")
+                        bail!("Something went wrong when trying to parse file link: {parsed:?}")
                     }
                 }
                 MiscText => res.push(DocumentComponent::new_text(lexer.slice())),
+                CarriageReturn => {
+                    res.push(DocumentComponent::new_text("\r"));
+                }
                 _ => todo!("Support missing token types: {token:?}"),
             },
-            Err(e) => panic!(
-                "Error: {e:?}! Encountered '{}' at {:?};",
-                lexer.slice(),
-                lexer.span()
-            ),
+            Err(_) => {
+                bail!("Error {}", construct_error_details(&lexer))
+            }
         }
     }
     let res = collapse_text(&res);
     Ok(res)
+}
+
+fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
+    let slice = lexer.slice().escape_default();
+    let start = lexer.span().start;
+    let text = lexer.source();
+    let line = text[0..start].lines().count();
+    format!("Encountered '{slice}' at {:?} (line {line});", lexer.span())
 }
 
 fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement> {
@@ -121,8 +142,13 @@ fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement
             ObsidianToken::Space => text.push_str(lexer.slice()),
             ObsidianToken::Name => text.push_str(lexer.slice()),
             ObsidianToken::MiscText => text.push_str(lexer.slice()),
+            ObsidianToken::CarriageReturn => text.push_str("\r"),
             ObsidianToken::Newline => return Ok(DocumentElement::Heading(level, text)),
-            _ => bail!("Failed to parse heading! Encountered {token:?}"),
+            ObsidianToken::Backslash => text.push_str(lexer.slice()),
+            other => bail!(
+                "Failed to parse heading! {other:?}: {}",
+                construct_error_details(&lexer)
+            ),
         }
     }
     bail!("Failed to parse heading!")
@@ -166,10 +192,7 @@ fn parse_file_link(
     lexer: &mut Lexer<'_, ObsidianToken>,
 ) -> Result<(String, Option<String>, Option<String>)> {
     use ObsidianToken::*;
-    let Some(Ok(Name)) = lexer.next() else {
-        panic!("")
-    };
-    let mut name = lexer.slice().to_string();
+    let mut name = String::new();
     let mut section = None;
     let mut rename = None;
     let mut awaiting_section = false;
@@ -197,6 +220,8 @@ fn parse_file_link(
                     section = extend_opt(&section, lexer.slice());
                 } else if awaiting_rename {
                     rename = extend_opt(&rename, lexer.slice());
+                } else {
+                    name.push_str(lexer.slice());
                 }
             }
             MiscText => name.push_str(lexer.slice()),
