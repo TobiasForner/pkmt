@@ -92,6 +92,21 @@ impl DocumentElement {
         });
         lines.join("\n")
     }
+
+    fn mentioned_files(&self) -> Vec<String> {
+        use DocumentElement::*;
+        match &self {
+            FileLink(file, _, _) => {
+                vec![file.clone()]
+            }
+            FileEmbed(file, _) => {
+                vec![file.clone()]
+            }
+            _ => {
+                vec![]
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +137,16 @@ impl DocumentComponent {
     pub fn new_text(text: &str) -> Self {
         Self::new(DocumentElement::Text(text.to_string()))
     }
+
+    fn mentioned_files(&self) -> Vec<String> {
+        let mut res = self.element.mentioned_files();
+        res.extend(
+            self.children
+                .iter()
+                .flat_map(|c| c.mentioned_files().into_iter()),
+        );
+        res
+    }
 }
 
 fn apply_substitutions(text: &str) -> String {
@@ -136,38 +161,46 @@ fn apply_substitutions(text: &str) -> String {
         .replace("–", "-")
 }
 
-pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Result<()> {
+pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Result<Vec<String>> {
     let root_dir = root_dir.canonicalize()?;
-    let files = files_in_tree(&root_dir)?;
+    let files = files_in_tree(&root_dir, &Some(vec!["md"]))?;
     let _ = std::fs::create_dir_all(&target_dir)?;
     let target_dir = target_dir.canonicalize()?;
     println!("target: {target_dir:?}");
 
-    let _ = files
+    let mentioned_files = files
         .iter()
         .map(|f| {
             let rel = pathdiff::diff_paths(&f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
             convert_file(f, &target, &mode)
         })
-        .collect::<Result<()>>()?;
-    Ok(())
+        .collect::<Result<Vec<Vec<String>>>>();
+    let mentioned_files = match mentioned_files {
+        Ok(v) => Ok(v.into_iter().flat_map(|v| v.into_iter()).collect()),
+        Err(e) => Err(e),
+    };
+    mentioned_files
 }
 
 pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     file: T,
     out_file: U,
     mode: &str,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let file = file.as_ref();
     let text = std::fs::read_to_string(&file)?;
     let text = apply_substitutions(&text);
-    let res = match mode {
+    let components = match mode {
         "Obsidian" => parse_obsidian(&text),
         _ => panic!("Unsupported mode: {mode}"),
     };
 
-    if let Ok(components) = res {
+    if let Ok(components) = components {
+        let mentioned_files = components
+            .iter()
+            .flat_map(|c| c.mentioned_files().into_iter())
+            .collect();
         let text = to_logseq_text(&components);
 
         let res =
@@ -175,13 +208,16 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
         if res.is_err() {
             bail!("Encountered: {res:?}!");
         }
-        Ok(())
+        Ok(mentioned_files)
     } else {
-        bail!("Could not convert the file {file:?} to obsidian: {res:?}")
+        bail!("Could not convert the file {file:?} to obsidian: {components:?}")
     }
 }
 
-fn files_in_tree<T: AsRef<Path>>(root_dir: T) -> Result<Vec<PathBuf>> {
+pub fn files_in_tree<T: AsRef<Path>>(
+    root_dir: T,
+    allowed_extensions: &Option<Vec<&str>>,
+) -> Result<Vec<PathBuf>> {
     let mut res = vec![];
     let root_dir = root_dir.as_ref().canonicalize()?;
     let dir_entry = root_dir.read_dir()?;
@@ -190,10 +226,14 @@ fn files_in_tree<T: AsRef<Path>>(root_dir: T) -> Result<Vec<PathBuf>> {
         .map(|f| {
             let path = f.unwrap().path();
             if path.is_dir() {
-                let rec = files_in_tree(&path)?;
+                let rec = files_in_tree(&path, allowed_extensions)?;
                 res.extend(rec.into_iter());
             } else if let Some(ext) = path.extension() {
-                if ["md"].contains(&ext.to_str().unwrap_or("should not be found")) {
+                if let Some(extensions) = allowed_extensions {
+                    if extensions.contains(&ext.to_str().unwrap_or("should not be found")) {
+                        res.push(path.clone());
+                    }
+                } else {
                     res.push(path.clone());
                 }
             }

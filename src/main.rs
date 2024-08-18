@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 mod file_checklist;
-use document_component::{convert_file, convert_tree};
+use document_component::{convert_file, convert_tree, files_in_tree};
 use file_checklist::checklist_for_tree;
 
-use std::{fmt::Debug, path::PathBuf};
+use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
 
 mod obsidian_parsing;
@@ -31,6 +31,13 @@ enum Commands {
         /// parsing mode
         #[arg(short, long)]
         mode: Option<String>,
+
+        /// image directory for the input files. If this is set, found image files will be copied to the output image dir `imout` (required in this case)
+        #[arg(long)]
+        imdir: Option<PathBuf>,
+
+        #[arg(long)]
+        imout: Option<PathBuf>,
     },
     /// generate a file checklist
     Checklist {
@@ -75,12 +82,62 @@ fn run() -> Result<()> {
             in_path,
             out_path,
             mode,
+            imdir,
+            imout,
         }) => {
             let mode = mode.unwrap_or("Obsidian".to_string());
-            if in_path.is_dir() {
-                let _ = convert_tree(in_path, out_path, &mode)?;
+            let mentioned_files = if in_path.is_dir() {
+                convert_tree(in_path, out_path, &mode)
             } else {
-                let _ = convert_file(in_path, out_path, &mode)?;
+                convert_file(in_path, out_path, &mode)
+            }?;
+
+            let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files.into_iter());
+
+            if let Some(imdir) = imdir {
+                if let Some(imout) = imout {
+                    let found_image_files = files_in_tree(&imdir, &Some(vec!["png"]))?;
+                    //println!("{found_image_files:?}");
+                    let matched_files: Vec<PathBuf> = found_image_files
+                        .into_iter()
+                        .filter(|f| {
+                            let Some(file_name) = f.file_name() else {
+                                return false;
+                            };
+                            let Some(file_name) = file_name.to_str() else {
+                                return false;
+                            };
+                            if mentioned_files.contains(file_name) {
+                                return true;
+                            }
+                            let file_name = PathBuf::from(file_name);
+                            let Some(file_name) = file_name.file_stem() else {
+                                return false;
+                            };
+                            let Some(file_name) = file_name.to_str() else {
+                                return false;
+                            };
+                            if mentioned_files.contains(file_name) {
+                                return true;
+                            }
+                            false
+                        })
+                        .collect();
+
+                    let imdir = imdir.canonicalize()?;
+                    let imout = imout.canonicalize()?;
+                    std::fs::create_dir(&imout)?;
+                    let _ = matched_files
+                        .into_iter()
+                        .map(|f| {
+                            let rel = pathdiff::diff_paths(&f, &imdir)
+                                .context(format!("Could not get relative path for {:?}", f))?;
+                            let target = imout.join(&rel);
+                            std::fs::copy(f, target)?;
+                            Ok(())
+                        })
+                        .collect::<Result<()>>()?;
+                }
             }
             Ok(())
         }
