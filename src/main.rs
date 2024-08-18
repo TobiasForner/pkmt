@@ -21,11 +21,11 @@ enum Commands {
     /// convert between different formats
     Convert {
         /// path to parse. If this is a directory, the out_path must also be a directory. Missing directories in out_path will be created.
-        #[arg(short, long)]
+        #[arg(required = true)]
         in_path: PathBuf,
 
         /// destination path to write to
-        #[arg(short, long)]
+        #[arg(required = true)]
         out_path: PathBuf,
 
         /// parsing mode
@@ -35,14 +35,14 @@ enum Commands {
     /// generate a file checklist
     Checklist {
         /// root directory to generate the checklist for
-        #[arg(short, long)]
+        #[arg(required = true)]
         root_dir: PathBuf,
 
         /// file to write the checklist to
-        #[arg(short, long)]
+        #[arg(required = true)]
         out_file: PathBuf,
         /// String to use to signal a todo
-        #[arg(short, long)]
+        #[arg(required = true)]
         todo_marker: String,
     },
 }
@@ -53,7 +53,9 @@ struct Args {}
 
 fn main() {
     let res = run();
-    println!("{res:?}");
+    if res.is_err() {
+        println!("{res:?}");
+    }
 }
 
 fn run() -> Result<()> {
