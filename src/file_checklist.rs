@@ -21,12 +21,13 @@ pub fn checklist_for_tree<T: AsRef<Path>>(root_dir: T, todo_marker: &str) -> Res
         })
         .collect::<Result<()>>()?;
 
-    let mut lines = vec![format!("- {todo_marker} {}", root_dir.to_string_lossy())];
+    let mut lines = vec![format!("- {todo_marker} `{}`", root_dir.to_string_lossy())];
     if !files.is_empty() {
-        lines.push(format!("\t- {todo_marker} files_in_dir"));
-        files
-            .iter()
-            .for_each(|f| lines.push(format!("\t\t- {todo_marker} {}", f.to_string_lossy())));
+        lines.push(format!("\t- {todo_marker} files in directory"));
+        files.iter().for_each(|f| {
+            let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
+            lines.push(format!("\t\t- {todo_marker} `{}`", rel.to_string_lossy()));
+        });
     }
     if !dirs.is_empty() {
         let dir_text = dirs
