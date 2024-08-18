@@ -309,7 +309,6 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
 ";
     let res = parse_obsidian(text);
     if let Ok(components) = res {
-        println!("comps: {components:?}");
         let res: String = to_logseq_text(&components);
         let expected = r"- ## Basic Definitions
 {{embed [[ApproximationAlgorithm]]}}

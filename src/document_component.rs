@@ -26,7 +26,7 @@ impl DocumentElement {
             FileLink(file, _, _) => format!("[[{file}]]"),
             FileEmbed(file, _) => format!("{{{{embed [[{file}]]}}}}"),
             Text(text) => {
-                let text_trim = if text.trim().is_empty() {
+                if text.trim().is_empty() {
                     let line_count = text.lines().count();
                     if line_count >= 3 {
                         String::from("\n\n")
@@ -35,9 +35,7 @@ impl DocumentElement {
                     }
                 } else {
                     text.clone()
-                };
-                println!("{text:?}--> {text_trim:?}");
-                text_trim
+                }
             }
             Admonition(s, props) => {
                 let mut parts = vec!["#+BEGIN_QUOTE".to_string()];
@@ -95,7 +93,7 @@ pub struct DocumentComponent {
 }
 
 impl DocumentComponent {
-    pub fn to_logseq_text(&self) -> String {
+    fn to_logseq_text(&self) -> String {
         [self.element.to_logseq_text()]
             .into_iter()
             .chain(self.children.iter().map(|c| {
@@ -130,7 +128,6 @@ pub fn to_logseq_text(components: &Vec<DocumentComponent>) -> String {
 
 pub fn collapse_text(components: &Vec<DocumentComponent>) -> Vec<DocumentComponent> {
     use DocumentElement::*;
-    //println!("Before collapse: {components:?}");
     let mut text = String::new();
     let mut res: Vec<DocumentComponent> = vec![];
     components.iter().for_each(|c| match &c.element {
@@ -159,6 +156,5 @@ pub fn collapse_text(components: &Vec<DocumentComponent>) -> Vec<DocumentCompone
     if !text.is_empty() {
         res.push(DocumentComponent::new_text(&text));
     }
-    //println!("After collapse: {res:?}");
     res
 }
