@@ -51,7 +51,6 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
     let mut res = vec![];
 
     while let Some(result) = lexer.next() {
-        //println!("current: {res[]:?}");
         match result {
             Ok(token) => match token {
                 EmbedStart => {
@@ -69,6 +68,7 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                     let elem = parse_heading(&mut lexer)?;
                     let comp = DocumentComponent::new(elem);
                     res.push(comp);
+                    res.push(DocumentComponent::new_text("\n"));
                 }
                 Name => res.push(DocumentComponent::new(DocumentElement::Text(
                     lexer.slice().to_string(),
@@ -167,16 +167,19 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
                     if line.starts_with("title: ") {
                         let remainder = line.strip_prefix("title: ").unwrap();
                         properties.insert("title".to_string(), remainder.trim().to_string());
+                    } else if line.starts_with("color: ") {
+                        let remainder = line.strip_prefix("color: ").unwrap();
+                        properties.insert("color".to_string(), remainder.trim().to_string());
                     } else {
                         body_lines.push(line);
                     }
                 }
                 let text = body_lines.join("\n");
-                return Ok(DocumentElement::Admonition(text, properties));
+                let comps = parse_obsidian(&text)?;
+                return Ok(DocumentElement::Admonition(comps, properties));
             }
             _ => {
                 let txt = lexer.slice();
-                // println!("adnote: {other:?} ({txt}), {:?}", lexer.span());
                 text.push_str(txt)
             }
         }
@@ -205,6 +208,7 @@ fn parse_file_link(
             Some(res)
         }
     };
+
     while let Some(Ok(token)) = lexer.next() {
         match token {
             ClosingDoubleBraces => return Ok((name, section, rename)),
@@ -224,8 +228,24 @@ fn parse_file_link(
                     name.push_str(lexer.slice());
                 }
             }
-            MiscText => name.push_str(lexer.slice()),
-            Space => name.push_str(lexer.slice()),
+            MiscText => {
+                if awaiting_section {
+                    section = extend_opt(&section, lexer.slice());
+                } else if awaiting_rename {
+                    rename = extend_opt(&rename, lexer.slice());
+                } else {
+                    name.push_str(lexer.slice());
+                }
+            }
+            Space => {
+                if awaiting_section {
+                    section = extend_opt(&section, lexer.slice());
+                } else if awaiting_rename {
+                    rename = extend_opt(&rename, lexer.slice());
+                } else {
+                    name.push_str(lexer.slice());
+                }
+            }
             _ => bail!("Encountered {token:?} during parse_file_link!"),
         }
     }
@@ -246,10 +266,60 @@ A new line!
         props.insert("title".to_string(), "Title".to_string());
         let expected = vec![DocumentComponent::new(
             crate::obsidian_parsing::DocumentElement::Admonition(
-                "Some text with $x+1$ math...\nA new line!".to_string(),
+                vec![DocumentComponent::new_text(
+                    "Some text with $x+1$ math...\nA new line!",
+                )],
                 props,
             ),
         )];
+        assert_eq!(res, expected);
+    } else {
+        assert!(false, "Got {res:?}")
+    }
+}
+
+#[test]
+fn test_text_parsing() {
+    use DocumentElement::*;
+    let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.";
+    let res = parse_obsidian(text);
+    if let Ok(res) = res {
+        let mut props = HashMap::new();
+        props.insert("title".to_string(), "Title".to_string());
+        let expected = vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink("MaximumClique".to_string(), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))];
+        assert_eq!(res, expected);
+    } else {
+        assert!(false, "Got {res:?}")
+    }
+}
+
+#[test]
+fn test_newlines() {
+    use crate::document_component::to_logseq_text;
+    let text = r"														
+## Basic Definitions
+![[ApproximationAlgorithm]]
+
+```ad-note
+title: Theorem 
+Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.
+```
+
+![[PTAS]]
+";
+    let res = parse_obsidian(text);
+    if let Ok(components) = res {
+        println!("comps: {components:?}");
+        let res: String = to_logseq_text(&components);
+        let expected = r"- ## Basic Definitions
+{{embed [[ApproximationAlgorithm]]}}
+
+#+BEGIN_QUOTE
+**Theorem**
+Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique]], unless P = NP.
+#+END_QUOTE
+
+{{embed [[PTAS]]}}".to_string();
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")

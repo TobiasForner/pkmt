@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use document_component::to_logseq_text;
 use obsidian_parsing::parse_obsidian;
 
 use std::path::{Path, PathBuf};
@@ -60,10 +61,9 @@ fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Result<()
                 "Obsidian" => parse_obsidian(&text),
                 _ => panic!("Unsupported mode: {mode}"),
             };
-            //println!("{res:?}");
+
             if let Ok(components) = res {
-                let lines: Vec<String> = components.iter().map(|c| c.to_logseq_text()).collect();
-                let text = lines.join("\n");
+                let text = to_logseq_text(&components);
 
                 let rel = pathdiff::diff_paths(&f, &root_dir).unwrap();
                 let target = target_dir.join(&rel);

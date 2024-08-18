@@ -8,17 +8,10 @@ pub enum DocumentElement {
     FileEmbed(String, Option<String>),
     Text(String),
     /// text, map storing additional properties
-    Admonition(String, HashMap<String, String>),
+    Admonition(Vec<DocumentComponent>, HashMap<String, String>),
 }
 
 impl DocumentElement {
-    fn is_inline_text(&self) -> bool {
-        match self {
-            DocumentElement::Text(_) => true,
-            _ => false,
-        }
-    }
-
     fn to_logseq_text(&self) -> String {
         use DocumentElement::*;
         let mut tmp = self.clone();
@@ -32,13 +25,31 @@ impl DocumentElement {
             // todo use other parsed properties
             FileLink(file, _, _) => format!("[[{file}]]"),
             FileEmbed(file, _) => format!("{{{{embed [[{file}]]}}}}"),
-            Text(text) => text.clone(),
+            Text(text) => {
+                let text_trim = if text.trim().is_empty() {
+                    let line_count = text.lines().count();
+                    if line_count >= 3 {
+                        String::from("\n\n")
+                    } else {
+                        "\n".repeat(line_count).to_string()
+                    }
+                } else {
+                    text.clone()
+                };
+                println!("{text:?}--> {text_trim:?}");
+                text_trim
+            }
             Admonition(s, props) => {
                 let mut parts = vec!["#+BEGIN_QUOTE".to_string()];
                 if let Some(title) = props.get("title") {
                     parts.push(format!("**{title}**"));
                 }
-                parts.push(s.to_string());
+                let body = s
+                    .iter()
+                    .map(|c| c.to_logseq_text())
+                    .collect::<Vec<String>>()
+                    .join("");
+                parts.push(body);
                 parts.push("#+END_QUOTE".to_string());
                 parts.join("\n")
             }
@@ -54,8 +65,8 @@ impl DocumentElement {
             Text(text) => {
                 *text = DocumentElement::cleanup_text(&text);
             }
-            Admonition(text, _) => {
-                *text = DocumentElement::cleanup_text(&text);
+            Admonition(components, _) => {
+                components.iter_mut().for_each(|c| c.element.cleanup());
             }
         }
     }
@@ -105,29 +116,39 @@ impl DocumentComponent {
     pub fn new_text(text: &str) -> Self {
         Self::new(DocumentElement::Text(text.to_string()))
     }
+}
 
-    fn is_inline_text(&self) -> bool {
-        if self.element.is_inline_text() {
-            assert!(self.children.is_empty(), "");
-            true
-        } else {
-            false
-        }
-    }
+pub fn to_logseq_text(components: &Vec<DocumentComponent>) -> String {
+    components
+        .iter()
+        .map(|c| c.to_logseq_text())
+        .collect::<Vec<String>>()
+        .join("")
+        .trim()
+        .to_string()
 }
 
 pub fn collapse_text(components: &Vec<DocumentComponent>) -> Vec<DocumentComponent> {
+    use DocumentElement::*;
+    //println!("Before collapse: {components:?}");
     let mut text = String::new();
     let mut res: Vec<DocumentComponent> = vec![];
-    components.iter().for_each(|c| {
-        if c.is_inline_text() {
-            match &c.element {
-                DocumentElement::Text(s) => {
-                    text.push_str(&s);
-                }
-                _ => panic!("{c:?} is not text!"),
+    components.iter().for_each(|c| match &c.element {
+        Text(s) => {
+            text.push_str(&s);
+        }
+        Admonition(components, properties) => {
+            if !text.is_empty() {
+                res.push(DocumentComponent::new_text(&text));
+                text = String::new();
             }
-        } else {
+            let collapsed = collapse_text(components);
+            res.push(DocumentComponent::new(Admonition(
+                collapsed,
+                properties.clone(),
+            )));
+        }
+        _ => {
             if !text.is_empty() {
                 res.push(DocumentComponent::new_text(&text));
                 text = String::new();
@@ -135,5 +156,9 @@ pub fn collapse_text(components: &Vec<DocumentComponent>) -> Vec<DocumentCompone
             res.push(c.clone());
         }
     });
+    if !text.is_empty() {
+        res.push(DocumentComponent::new_text(&text));
+    }
+    //println!("After collapse: {res:?}");
     res
 }
