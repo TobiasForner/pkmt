@@ -47,14 +47,14 @@ enum ObsidianToken {
 pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<DocumentComponent>> {
     use ObsidianToken::*;
 
-    let mut lexer = ObsidianToken::lexer(&text);
+    let mut lexer = ObsidianToken::lexer(text);
     let mut res = vec![];
 
     while let Some(result) = lexer.next() {
         match result {
             Ok(token) => match token {
                 EmbedStart => {
-                    let parsed = parse_file_link(&mut lexer, &file_dir);
+                    let parsed = parse_file_link(&mut lexer, file_dir);
                     // no rename for file embeds
                     if let Ok((name, section, _)) = parsed {
                         res.push(DocumentComponent::new(DocumentElement::FileEmbed(
@@ -74,7 +74,7 @@ pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<Docu
                     lexer.slice().to_string(),
                 ))),
                 AdNoteStart => {
-                    res.push(DocumentComponent::new(parse_adnote(&mut lexer, &file_dir)?));
+                    res.push(DocumentComponent::new(parse_adnote(&mut lexer, file_dir)?));
                 }
                 Space => {
                     res.push(DocumentComponent::new(DocumentElement::Text(
@@ -99,7 +99,7 @@ pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<Docu
                     res.push(DocumentComponent::new_text("\\"));
                 }
                 OpenDoubleBraces => {
-                    let parsed = parse_file_link(&mut lexer, &file_dir);
+                    let parsed = parse_file_link(&mut lexer, file_dir);
                     if let Ok((name, section, rename)) = parsed {
                         res.push(DocumentComponent::new(DocumentElement::FileLink(
                             name, section, rename,
@@ -142,12 +142,12 @@ fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement
             ObsidianToken::Space => text.push_str(lexer.slice()),
             ObsidianToken::Name => text.push_str(lexer.slice()),
             ObsidianToken::MiscText => text.push_str(lexer.slice()),
-            ObsidianToken::CarriageReturn => text.push_str("\r"),
+            ObsidianToken::CarriageReturn => text.push('\r'),
             ObsidianToken::Newline => return Ok(DocumentElement::Heading(level, text)),
             ObsidianToken::Backslash => text.push_str(lexer.slice()),
             other => bail!(
                 "Failed to parse heading! {other:?}: {}",
-                construct_error_details(&lexer)
+                construct_error_details(lexer)
             ),
         }
     }
@@ -207,7 +207,7 @@ fn parse_file_link(
 
     let extend_opt = {
         |s: &Option<String>, ext: &str| {
-            let mut res = s.clone().unwrap_or(String::new());
+            let mut res = s.clone().unwrap_or_default();
             res.push_str(ext);
             Some(res)
         }

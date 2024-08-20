@@ -74,7 +74,7 @@ fn run() -> Result<()> {
             todo_marker,
         }) => {
             let res = checklist_for_tree(root_dir, &todo_marker)?;
-            let _ = std::fs::write(&out_file, res)
+            std::fs::write(&out_file, res)
                 .context(format!("Could not write checklist to {out_file:?}!"))?;
             Ok(())
         }
@@ -92,7 +92,7 @@ fn run() -> Result<()> {
                 convert_file(in_path, out_path, &mode)
             }?;
 
-            let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files.into_iter());
+            let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);
 
             if let Some(imdir) = imdir {
                 if let Some(imout) = imout {
@@ -129,13 +129,13 @@ fn run() -> Result<()> {
                     if !imout.exists() {
                         std::fs::create_dir(&imout)?;
                     }
-                            let rel = pathdiff::diff_paths(&f, &imdir)
-                                .context(format!("Could not get relative path for {:?}", f))?;
-                            let target = imout.join(&rel);
-                            std::fs::copy(f, target)?;
-                            Ok(())
-                        })
-                        .collect::<Result<()>>()?;
+                    let _: () = matched_files.into_iter().try_for_each(|f| {
+                        let rel = pathdiff::diff_paths(&f, &imdir)
+                            .context(format!("Could not get relative path for {:?}", f))?;
+                        let target = imout.join(&rel);
+                        std::fs::copy(f, target)?;
+                        Ok::<(), anyhow::Error>(())
+                    })?;
                 }
             }
             Ok(())

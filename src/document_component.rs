@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display, Formatter, Write},
     path::{Path, PathBuf},
 };
 
@@ -84,7 +84,7 @@ impl DocumentElement {
         match self {
             Heading(_, text) => *text = text.trim().to_string(),
             Text(text) => {
-                *text = DocumentElement::cleanup_text(&text);
+                *text = DocumentElement::cleanup_text(text);
             }
             Admonition(components, _) => {
                 components.iter_mut().for_each(|c| c.element.cleanup());
@@ -139,10 +139,12 @@ impl DocumentComponent {
         [self.element.to_logseq_text()]
             .into_iter()
             .chain(self.children.iter().map(|c| {
-                c.to_logseq_text()
-                    .lines()
-                    .map(|line| format!("\t{line}"))
-                    .collect::<String>()
+                let mut res = String::new();
+                c.to_logseq_text().lines().for_each(|line| {
+                    let _ = res.write_str("\t");
+                    let _ = res.write_str(line);
+                });
+                res
             }))
             .collect()
     }
@@ -176,7 +178,6 @@ fn apply_substitutions(text: &str) -> String {
         .replace("”", "\"")
         .replace("∃", "EXISTS")
         .replace("’", "'")
-        .replace("_", "_")
         .replace("–", "-")
 }
 
@@ -184,23 +185,22 @@ pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Resul
     let root_dir = root_dir.canonicalize()?;
     let files = files_in_tree(&root_dir, &Some(vec!["md"]))?;
     if !target_dir.exists() {
-        let _ = std::fs::create_dir_all(&target_dir)?;
+        std::fs::create_dir_all(&target_dir)?;
     }
     let target_dir = target_dir.canonicalize()?;
 
     let mentioned_files = files
         .iter()
         .map(|f| {
-            let rel = pathdiff::diff_paths(&f, &root_dir).unwrap();
+            let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
-            convert_file(f, &target, &mode)
+            convert_file(f, &target, mode)
         })
         .collect::<Result<Vec<Vec<String>>>>();
-    let mentioned_files = match mentioned_files {
+    match mentioned_files {
         Ok(v) => Ok(v.into_iter().flat_map(|v| v.into_iter()).collect()),
         Err(e) => Err(e),
-    };
-    mentioned_files
+    }
 }
 
 pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
@@ -245,32 +245,29 @@ pub fn files_in_tree<T: AsRef<Path>>(
     let mut res = vec![];
     let root_dir = root_dir.as_ref().canonicalize()?;
     let dir_entry = root_dir.read_dir()?;
-    let tmp: Result<()> = dir_entry
-        .into_iter()
-        .map(|f| {
-            let path = f.unwrap().path();
-            if path.is_dir() {
-                let rec = files_in_tree(&path, allowed_extensions)?;
-                res.extend(rec.into_iter());
-            } else if let Some(ext) = path.extension() {
-                if let Some(extensions) = allowed_extensions {
-                    if extensions.contains(&ext.to_str().unwrap_or("should not be found")) {
-                        res.push(path.clone());
-                    }
-                } else {
+    let tmp: Result<()> = dir_entry.into_iter().try_for_each(|f| {
+        let path = f.unwrap().path();
+        if path.is_dir() {
+            let rec = files_in_tree(&path, allowed_extensions)?;
+            res.extend(rec);
+        } else if let Some(ext) = path.extension() {
+            if let Some(extensions) = allowed_extensions {
+                if extensions.contains(&ext.to_str().unwrap_or("should not be found")) {
                     res.push(path.clone());
                 }
+            } else {
+                res.push(path.clone());
             }
-            Ok(())
-        })
-        .collect();
+        }
+        Ok(())
+    });
     if tmp.is_err() {
         bail!("Encountered error: {tmp:?}!")
     }
     Ok(res)
 }
 
-pub fn to_logseq_text(components: &Vec<DocumentComponent>) -> String {
+pub fn to_logseq_text(components: &[DocumentComponent]) -> String {
     components
         .iter()
         .map(|c| c.to_logseq_text())
@@ -280,13 +277,13 @@ pub fn to_logseq_text(components: &Vec<DocumentComponent>) -> String {
         .to_string()
 }
 
-pub fn collapse_text(components: &Vec<DocumentComponent>) -> Vec<DocumentComponent> {
+pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent> {
     use DocumentElement::*;
     let mut text = String::new();
     let mut res: Vec<DocumentComponent> = vec![];
     components.iter().for_each(|c| match &c.element {
         Text(s) => {
-            text.push_str(&s);
+            text.push_str(s);
         }
         Admonition(components, properties) => {
             if !text.is_empty() {
