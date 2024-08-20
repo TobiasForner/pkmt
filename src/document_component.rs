@@ -184,7 +184,7 @@ pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Resul
     let root_dir = root_dir.canonicalize()?;
     let files = files_in_tree(&root_dir, &Some(vec!["md"]))?;
     if !target_dir.exists() {
-    let _ = std::fs::create_dir_all(&target_dir)?;
+        let _ = std::fs::create_dir_all(&target_dir)?;
     }
     let target_dir = target_dir.canonicalize()?;
 

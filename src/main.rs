@@ -127,7 +127,7 @@ fn run() -> Result<()> {
                     let imdir = imdir.canonicalize()?;
                     let imout = imout.canonicalize()?;
                     if !imout.exists() {
-                    std::fs::create_dir(&imout)?;
+                        std::fs::create_dir(&imout)?;
                     }
                             let rel = pathdiff::diff_paths(&f, &imdir)
                                 .context(format!("Could not get relative path for {:?}", f))?;
