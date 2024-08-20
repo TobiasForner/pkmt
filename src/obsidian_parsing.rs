@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::{bail, Result};
 
-use crate::document_component::{collapse_text, DocumentComponent, DocumentElement};
+use crate::document_component::{collapse_text, DocumentComponent, DocumentElement, MentionedFile};
 use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, PartialEq)]
@@ -44,7 +44,7 @@ enum ObsidianToken {
     Backslash,
 }
 
-pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
+pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<DocumentComponent>> {
     use ObsidianToken::*;
 
     let mut lexer = ObsidianToken::lexer(&text);
@@ -54,7 +54,7 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
         match result {
             Ok(token) => match token {
                 EmbedStart => {
-                    let parsed = parse_file_link(&mut lexer);
+                    let parsed = parse_file_link(&mut lexer, &file_dir);
                     // no rename for file embeds
                     if let Ok((name, section, _)) = parsed {
                         res.push(DocumentComponent::new(DocumentElement::FileEmbed(
@@ -74,7 +74,7 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                     lexer.slice().to_string(),
                 ))),
                 AdNoteStart => {
-                    res.push(DocumentComponent::new(parse_adnote(&mut lexer)?));
+                    res.push(DocumentComponent::new(parse_adnote(&mut lexer, &file_dir)?));
                 }
                 Space => {
                     res.push(DocumentComponent::new(DocumentElement::Text(
@@ -99,7 +99,7 @@ pub fn parse_obsidian(text: &str) -> Result<Vec<DocumentComponent>> {
                     res.push(DocumentComponent::new_text("\\"));
                 }
                 OpenDoubleBraces => {
-                    let parsed = parse_file_link(&mut lexer);
+                    let parsed = parse_file_link(&mut lexer, &file_dir);
                     if let Ok((name, section, rename)) = parsed {
                         res.push(DocumentComponent::new(DocumentElement::FileLink(
                             name, section, rename,
@@ -154,7 +154,10 @@ fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement
     bail!("Failed to parse heading!")
 }
 
-fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement> {
+fn parse_adnote(
+    lexer: &mut Lexer<'_, ObsidianToken>,
+    file_dir: &Option<PathBuf>,
+) -> Result<DocumentElement> {
     let mut text = String::new();
     while let Some(Ok(token)) = lexer.next() {
         match token {
@@ -175,7 +178,7 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
                     }
                 }
                 let text = body_lines.join("\n");
-                let comps = parse_obsidian(&text)?;
+                let comps = parse_obsidian(&text, file_dir)?;
                 return Ok(DocumentElement::Admonition(comps, properties));
             }
             _ => {
@@ -193,7 +196,8 @@ fn parse_adnote(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement>
 
 fn parse_file_link(
     lexer: &mut Lexer<'_, ObsidianToken>,
-) -> Result<(String, Option<String>, Option<String>)> {
+    file_dir: &Option<PathBuf>,
+) -> Result<(MentionedFile, Option<String>, Option<String>)> {
     use ObsidianToken::*;
     let mut name = String::new();
     let mut section = None;
@@ -211,7 +215,23 @@ fn parse_file_link(
 
     while let Some(Ok(token)) = lexer.next() {
         match token {
-            ClosingDoubleBraces => return Ok((name, section, rename)),
+            ClosingDoubleBraces => {
+                let name = name.trim().to_string();
+                let mut mf = MentionedFile::FileName(name.clone());
+                if let Some(dir) = file_dir {
+                    let file = dir.join(&name);
+                    if file.exists() {
+                        let file = file.canonicalize()?;
+                        mf = MentionedFile::FilePath(file);
+                    }
+                    let Ok(file) = PathBuf::from_str(&name);
+
+                    if file.exists() {
+                        mf = MentionedFile::FilePath(file.canonicalize()?);
+                    }
+                }
+                return Ok((mf, section, rename));
+            }
             SingleHash => {
                 awaiting_section = true;
             }
@@ -260,7 +280,7 @@ Some text with $x+1$ math...
 A new line!
 ```";
 
-    let res = parse_obsidian(text);
+    let res = parse_obsidian(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
@@ -282,11 +302,11 @@ A new line!
 fn test_text_parsing() {
     use DocumentElement::*;
     let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.";
-    let res = parse_obsidian(text);
+    let res = parse_obsidian(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink("MaximumClique".to_string(), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))];
+        let expected = vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))];
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
@@ -307,7 +327,7 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
 
 ![[PTAS]]
 ";
-    let res = parse_obsidian(text);
+    let res = parse_obsidian(text, &None);
     if let Ok(components) = res {
         let res: String = to_logseq_text(&components);
         let expected = r"- ## Basic Definitions

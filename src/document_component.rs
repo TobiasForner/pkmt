@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{Debug, Display, Formatter},
     path::{Path, PathBuf},
 };
 
@@ -8,12 +8,29 @@ use anyhow::{bail, Context, Result};
 
 use crate::obsidian_parsing::parse_obsidian;
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum MentionedFile {
+    FileName(String),
+    FilePath(PathBuf),
+}
+
+impl Display for MentionedFile {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        use MentionedFile::*;
+        let s = match self {
+            FileName(name) => name.clone(),
+            FilePath(path) => path.to_string_lossy().to_string(),
+        };
+        fmt.write_str(&s)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DocumentElement {
     Heading(u16, String),
     /// file, optional section, optional rename
-    FileLink(String, Option<String>, Option<String>),
-    FileEmbed(String, Option<String>),
+    FileLink(MentionedFile, Option<String>, Option<String>),
+    FileEmbed(MentionedFile, Option<String>),
     Text(String),
     /// text, map storing additional properties
     Admonition(Vec<DocumentComponent>, HashMap<String, String>),
@@ -66,14 +83,13 @@ impl DocumentElement {
         use DocumentElement::*;
         match self {
             Heading(_, text) => *text = text.trim().to_string(),
-            FileLink(file, _, _) => *file = file.trim().to_string(),
-            FileEmbed(file, _) => *file = file.trim().to_string(),
             Text(text) => {
                 *text = DocumentElement::cleanup_text(&text);
             }
             Admonition(components, _) => {
                 components.iter_mut().for_each(|c| c.element.cleanup());
             }
+            _ => {}
         }
     }
 
@@ -95,15 +111,18 @@ impl DocumentElement {
 
     fn mentioned_files(&self) -> Vec<String> {
         use DocumentElement::*;
-        match &self {
-            FileLink(file, _, _) => {
-                vec![file.clone()]
-            }
-            FileEmbed(file, _) => {
-                vec![file.clone()]
-            }
+        let file = match &self {
+            FileLink(file, _, _) => file.clone(),
+            FileEmbed(file, _) => file.clone(),
             _ => {
-                vec![]
+                return vec![];
+            }
+        };
+
+        match file {
+            MentionedFile::FileName(name) => vec![name.clone()],
+            MentionedFile::FilePath(p) => {
+                vec![p.file_name().unwrap().to_string_lossy().to_string()]
             }
         }
     }
@@ -190,10 +209,14 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     mode: &str,
 ) -> Result<Vec<String>> {
     let file = file.as_ref();
+    let file = file.canonicalize()?;
     let text = std::fs::read_to_string(&file)?;
     let text = apply_substitutions(&text);
+    let file_dir = file
+        .parent()
+        .context(format!("Could get parent of {file:?}!"))?;
     let components = match mode {
-        "Obsidian" => parse_obsidian(&text),
+        "Obsidian" => parse_obsidian(&text, &Some(file_dir.to_path_buf())),
         _ => panic!("Unsupported mode: {mode}"),
     };
 
