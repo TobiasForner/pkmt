@@ -37,7 +37,10 @@ pub enum DocumentElement {
 }
 
 impl DocumentElement {
-    fn to_logseq_text(&self) -> String {
+    /// converts the element to logseq text
+    /// file_dirs has the form Some(directory of the current file, directory images will be placed in) or None.
+    /// If given, this information is used to update image embeds
+    fn to_logseq_text(&self, file_dirs: &Option<(PathBuf, PathBuf)>) -> String {
         use DocumentElement::*;
         let mut tmp = self.clone();
         tmp.cleanup();
@@ -49,7 +52,28 @@ impl DocumentElement {
             }
             // todo use other parsed properties
             FileLink(file, _, _) => format!("[[{file}]]"),
-            FileEmbed(file, _) => format!("{{{{embed [[{file}]]}}}}"),
+            FileEmbed(file, _) => match file {
+                MentionedFile::FileName(_) => format!("{{{{embed [[{file}]]}}}}"),
+                MentionedFile::FilePath(p) => {
+                    if let Some((file_dir, image_dir)) = file_dirs {
+                        if let Some(ext) = p.extension() {
+                            let ext = ext.to_string_lossy().to_string();
+                            if ["png", "jpeg"].contains(&ext.as_str()) {
+                                if let Some(name) = p.file_name() {
+                                    let rel = pathdiff::diff_paths(image_dir.join(name), file_dir);
+                                    if let Some(rel) = rel {
+                                        return format!(
+                                            "![image.{ext}]({})",
+                                            rel.to_string_lossy().replace("\\", "/")
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return format!("{{{{embed [[{file}]]}}}}");
+                }
+            },
             Text(text) => {
                 if text.trim().is_empty() {
                     let line_count = text.lines().count();
@@ -91,7 +115,7 @@ impl DocumentElement {
                 }
                 let body = s
                     .iter()
-                    .map(|c| c.to_logseq_text())
+                    .map(|c| c.to_logseq_text(file_dirs))
                     .collect::<Vec<String>>()
                     .join("");
                 parts.push(body);
@@ -164,12 +188,15 @@ pub struct DocumentComponent {
 }
 
 impl DocumentComponent {
-    fn to_logseq_text(&self) -> String {
-        [self.element.to_logseq_text()]
+    /// converts the component to logseq text
+    /// file_dirs has the form Some(directory of the current file, directory images will be placed in) or None.
+    /// If given, this information is used to update image embeds
+    fn to_logseq_text(&self, file_dirs: &Option<(PathBuf, PathBuf)>) -> String {
+        [self.element.to_logseq_text(&file_dirs)]
             .into_iter()
             .chain(self.children.iter().map(|c| {
                 let mut res = String::new();
-                c.to_logseq_text().lines().for_each(|line| {
+                c.to_logseq_text(&file_dirs).lines().for_each(|line| {
                     let _ = res.write_str("\t");
                     let _ = res.write_str(line);
                 });
@@ -214,7 +241,12 @@ fn apply_substitutions(text: &str) -> String {
         .replace("–", "-")
 }
 
-pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Result<Vec<String>> {
+pub fn convert_tree(
+    root_dir: PathBuf,
+    target_dir: PathBuf,
+    mode: &str,
+    imdir: &Option<PathBuf>,
+) -> Result<Vec<String>> {
     let root_dir = root_dir.canonicalize()?;
     let files = files_in_tree(&root_dir, &Some(vec!["md"]))?;
     if !target_dir.exists() {
@@ -227,7 +259,8 @@ pub fn convert_tree(root_dir: PathBuf, target_dir: PathBuf, mode: &str) -> Resul
         .map(|f| {
             let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
-            convert_file(f, &target, mode)
+            let file_dirs = imdir.clone().map(|imdir| (f.clone(), imdir));
+            convert_file(f, &target, mode, &file_dirs)
         })
         .collect::<Result<Vec<Vec<String>>>>();
     match mentioned_files {
@@ -240,6 +273,7 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     file: T,
     out_file: U,
     mode: &str,
+    file_dirs: &Option<(PathBuf, PathBuf)>,
 ) -> Result<Vec<String>> {
     let file = file.as_ref();
     let file = file.canonicalize()?;
@@ -258,7 +292,7 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
             .iter()
             .flat_map(|c| c.mentioned_files().into_iter())
             .collect();
-        let text = to_logseq_text(&components);
+        let text = to_logseq_text(&components, file_dirs);
 
         let res =
             std::fs::write(&out_file, text).context(format!("Failed to write to {out_file:?}"));
@@ -300,19 +334,21 @@ pub fn files_in_tree<T: AsRef<Path>>(
     Ok(res)
 }
 
-pub fn to_logseq_text(components: &[DocumentComponent]) -> String {
+pub fn to_logseq_text(
+    components: &[DocumentComponent],
+    file_dirs: &Option<(PathBuf, PathBuf)>,
+) -> String {
     let mut res = String::new();
     let mut last_empty = false;
     components.iter().for_each(|c| {
-        println!("{c:?}: {}", c.is_empty_lines());
-        if res.is_empty() && c.to_logseq_text().trim().is_empty() {
+        if res.is_empty() && c.to_logseq_text(file_dirs).trim().is_empty() {
             // do nothing
         } else if c.is_empty_lines() {
             if !res.is_empty() {
                 last_empty = true;
             }
         } else {
-            let text = c.to_logseq_text();
+            let text = c.to_logseq_text(file_dirs);
             if last_empty {
                 let indent = " ".repeat(indent_level(&text, 4));
                 res.push('\n');

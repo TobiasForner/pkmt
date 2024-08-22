@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 mod file_checklist;
 use document_component::{convert_file, convert_tree, files_in_tree};
@@ -85,11 +85,15 @@ fn run() -> Result<()> {
             imdir,
             imout,
         }) => {
+            if imdir.is_none() && imout.is_some() || imdir.is_some() && imout.is_none() {
+                bail!("Either both imdir and imout need to be specified or none of them!")
+            }
             let mode = mode.unwrap_or("Obsidian".to_string());
             let mentioned_files = if in_path.is_dir() {
-                convert_tree(in_path, out_path, &mode)
+                convert_tree(in_path, out_path, &mode, &imout)
             } else {
-                convert_file(in_path, out_path, &mode)
+                let file_dirs = imdir.clone().map(|imdir| (in_path.clone(), imdir));
+                convert_file(in_path, out_path, &mode, &file_dirs)
             }?;
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);
