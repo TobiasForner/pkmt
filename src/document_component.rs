@@ -59,7 +59,29 @@ impl DocumentElement {
                         "\n".repeat(line_count).to_string()
                     }
                 } else {
-                    text.clone()
+                    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+                    let mut res_lines: Vec<String> = vec![];
+                    let mut last_empty = false;
+                    (0..lines.len()).for_each(|n| {
+                        let line = &lines[n];
+                        if line.is_empty() {
+                            last_empty = true;
+                        } else {
+                            if last_empty {
+                                if line.trim().starts_with('-') {
+                                    res_lines.push(line.clone());
+                                } else {
+                                    let indent = " ".repeat(indent_level(line, 4));
+                                    let line = line.trim();
+                                    res_lines.push(format!("\n{indent}- {line}"));
+                                }
+                            } else {
+                                res_lines.push(line.clone());
+                            }
+                            last_empty = false;
+                        }
+                    });
+                    res_lines.join("\n")
                 }
             }
             Admonition(s, props) => {
@@ -76,6 +98,13 @@ impl DocumentElement {
                 parts.push("#+END_QUOTE".to_string());
                 parts.join("\n")
             }
+        }
+    }
+
+    fn is_empty_lines(&self) -> bool {
+        match self {
+            DocumentElement::Text(text) => text.trim().is_empty() && text.lines().count() > 1,
+            _ => false,
         }
     }
 
@@ -147,6 +176,10 @@ impl DocumentComponent {
                 res
             }))
             .collect()
+    }
+
+    pub fn is_empty_lines(&self) -> bool {
+        self.element.is_empty_lines()
     }
     pub fn new(element: DocumentElement) -> Self {
         Self {
@@ -268,13 +301,43 @@ pub fn files_in_tree<T: AsRef<Path>>(
 }
 
 pub fn to_logseq_text(components: &[DocumentComponent]) -> String {
-    components
-        .iter()
-        .map(|c| c.to_logseq_text())
-        .collect::<Vec<String>>()
-        .join("")
-        .trim()
-        .to_string()
+    let mut res = String::new();
+    let mut last_empty = false;
+    components.iter().for_each(|c| {
+        println!("{c:?}: {}", c.is_empty_lines());
+        if res.is_empty() && c.to_logseq_text().trim().is_empty() {
+            // do nothing
+        } else if c.is_empty_lines() {
+            if !res.is_empty() {
+                last_empty = true;
+            }
+        } else {
+            let text = c.to_logseq_text();
+            if last_empty {
+                let indent = " ".repeat(indent_level(&text, 4));
+                res.push('\n');
+                if text.trim().starts_with('-') {
+                    res.push_str(&text);
+                } else {
+                    text.lines().enumerate().for_each(|(index, line)| {
+                        if index == 0 {
+                            res.push_str(&indent);
+                            res.push_str("- ");
+                        } else {
+                            res.push('\n');
+                            res.push_str(&indent);
+                        }
+                        res.push_str(line);
+                    });
+                }
+            } else {
+                res.push_str(&text);
+            }
+            last_empty = false;
+        }
+    });
+    let res = res.trim_end().to_string();
+    res
 }
 
 pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent> {
@@ -306,6 +369,18 @@ pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent>
     });
     if !text.is_empty() {
         res.push(DocumentComponent::new_text(&text));
+    }
+    res
+}
+
+fn indent_level(line: &str, spaces_per_indent: usize) -> usize {
+    let indent_pattern = " ".repeat(spaces_per_indent);
+    let line = line.replace("\t", &indent_pattern);
+    let mut res = 0;
+    let mut pos = 0;
+    while pos < line.len() && line[pos..].starts_with(&indent_pattern) {
+        res += 1;
+        pos += spaces_per_indent;
     }
     res
 }

@@ -329,16 +329,14 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
 ";
     let res = parse_obsidian(text, &None);
     if let Ok(components) = res {
-        let res: String = to_logseq_text(&components);
+        let res: String = to_logseq_text(&components, &None);
         let expected = r"- ## Basic Definitions
 {{embed [[ApproximationAlgorithm]]}}
-
-#+BEGIN_QUOTE
+- #+BEGIN_QUOTE
 **Theorem**
 Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique]], unless P = NP.
 #+END_QUOTE
-
-{{embed [[PTAS]]}}".to_string();
+- {{embed [[PTAS]]}}".to_string();
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
