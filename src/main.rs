@@ -92,8 +92,7 @@ fn run() -> Result<()> {
             let mentioned_files = if in_path.is_dir() {
                 convert_tree(in_path, out_path, &mode, &imout)
             } else {
-                let file_dirs = imdir.clone().map(|imdir| (in_path.clone(), imdir));
-                convert_file(in_path, out_path, &mode, &file_dirs)
+                convert_file(in_path, out_path, &mode, &imdir)
             }?;
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);

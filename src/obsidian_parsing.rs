@@ -1,8 +1,14 @@
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
-use crate::document_component::{collapse_text, DocumentComponent, DocumentElement, MentionedFile};
+use crate::document_component::{
+    collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
+};
 use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, PartialEq)]
@@ -44,10 +50,24 @@ enum ObsidianToken {
     Backslash,
 }
 
-pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<DocumentComponent>> {
-    use ObsidianToken::*;
+pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
+    let file_path = file_path.as_ref().canonicalize()?;
+    let text = std::fs::read_to_string(&file_path)?;
 
-    let mut lexer = ObsidianToken::lexer(text);
+    let file_dir = file_path
+        .parent()
+        .context(format!("{file_path:?} has no parent!"))?
+        .to_path_buf();
+
+    let pt = parse_obsidian_text(&text, &Some(file_dir))?;
+    Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
+}
+
+pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
+    use ObsidianToken::*;
+    let text = apply_substitutions(text);
+
+    let mut lexer = ObsidianToken::lexer(&text);
     let mut res = vec![];
 
     while let Some(result) = lexer.next() {
@@ -120,7 +140,7 @@ pub fn parse_obsidian(text: &str, file_dir: &Option<PathBuf>) -> Result<Vec<Docu
         }
     }
     let res = collapse_text(&res);
-    Ok(res)
+    Ok(ParsedDocument::ParsedText(res))
 }
 
 fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
@@ -178,8 +198,11 @@ fn parse_adnote(
                     }
                 }
                 let text = body_lines.join("\n");
-                let comps = parse_obsidian(&text, file_dir)?;
-                return Ok(DocumentElement::Admonition(comps, properties));
+                let pd = parse_obsidian_text(&text, file_dir)?;
+                return Ok(DocumentElement::Admonition(
+                    pd.into_components(),
+                    properties,
+                ));
             }
             _ => {
                 let txt = lexer.slice();
@@ -272,6 +295,17 @@ fn parse_file_link(
     bail!("Failed to parse file link!")
 }
 
+fn apply_substitutions(text: &str) -> String {
+    text.replace('−', "-")
+        .replace('∗', "*")
+        .replace('∈', "\\in ")
+        .replace("“", "\"")
+        .replace("”", "\"")
+        .replace("∃", "EXISTS")
+        .replace("’", "'")
+        .replace("–", "-")
+}
+
 #[test]
 fn test_admonition() {
     let text = "```ad-note
@@ -280,18 +314,18 @@ Some text with $x+1$ math...
 A new line!
 ```";
 
-    let res = parse_obsidian(text, &None);
+    let res = parse_obsidian_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = vec![DocumentComponent::new(
+        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(
             crate::obsidian_parsing::DocumentElement::Admonition(
                 vec![DocumentComponent::new_text(
                     "Some text with $x+1$ math...\nA new line!",
                 )],
                 props,
             ),
-        )];
+        )]);
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
@@ -302,11 +336,11 @@ A new line!
 fn test_text_parsing() {
     use DocumentElement::*;
     let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.";
-    let res = parse_obsidian(text, &None);
+    let res = parse_obsidian_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))];
+        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
@@ -315,7 +349,6 @@ fn test_text_parsing() {
 
 #[test]
 fn test_newlines() {
-    use crate::document_component::to_logseq_text;
     let text = r"														
 ## Basic Definitions
 ![[ApproximationAlgorithm]]
@@ -327,9 +360,9 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
 
 ![[PTAS]]
 ";
-    let res = parse_obsidian(text, &None);
-    if let Ok(components) = res {
-        let res: String = to_logseq_text(&components, &None);
+    let res = parse_obsidian_text(text, &None);
+    if let Ok(res) = res {
+        let res = res.to_logseq_text(None);
         let expected = r"- ## Basic Definitions
 {{embed [[ApproximationAlgorithm]]}}
 - #+BEGIN_QUOTE

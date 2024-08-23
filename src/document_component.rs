@@ -6,7 +6,80 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
-use crate::obsidian_parsing::parse_obsidian;
+use crate::obsidian_parsing::parse_obsidian_file;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParsedDocument {
+    ParsedFile(Vec<DocumentComponent>, PathBuf),
+    ParsedText(Vec<DocumentComponent>),
+}
+
+impl ParsedDocument {
+    pub fn components(&self) -> &Vec<DocumentComponent> {
+        use ParsedDocument::*;
+        match self {
+            ParsedFile(comps, _) => comps,
+            ParsedText(comps) => comps,
+        }
+    }
+    pub fn into_components(self) -> Vec<DocumentComponent> {
+        use ParsedDocument::*;
+        match self {
+            ParsedFile(comps, _) => comps,
+            ParsedText(comps) => comps,
+        }
+    }
+
+    fn mentioned_files(&self) -> Vec<String> {
+        self.components()
+            .iter()
+            .flat_map(|c| c.mentioned_files().into_iter())
+            .collect()
+    }
+    pub fn to_logseq_text(&self, image_dir: Option<PathBuf>) -> String {
+        use ParsedDocument::*;
+        let file_dirs = match self {
+            ParsedFile(_, file_dir) => image_dir.map(|d| (file_dir.clone(), d)),
+            ParsedText(_) => None,
+        };
+        let mut res = String::new();
+        let mut last_empty = false;
+        self.components().iter().for_each(|c| {
+            if res.is_empty() && c.to_logseq_text(&file_dirs).trim().is_empty() {
+                // do nothing
+            } else if c.is_empty_lines() {
+                if !res.is_empty() {
+                    last_empty = true;
+                }
+            } else {
+                let text = c.to_logseq_text(&file_dirs);
+                if last_empty {
+                    let indent = " ".repeat(indent_level(&text, 4));
+                    res.push('\n');
+                    if text.trim().starts_with('-') {
+                        res.push_str(&text);
+                    } else {
+                        text.lines().enumerate().for_each(|(index, line)| {
+                            if index == 0 {
+                                res.push_str(&indent);
+                                res.push_str("- ");
+                            } else {
+                                res.push('\n');
+                                res.push_str(&indent);
+                            }
+                            res.push_str(line);
+                        });
+                    }
+                } else {
+                    res.push_str(&text);
+                }
+                last_empty = false;
+            }
+        });
+        let res = res.trim_end().to_string();
+        res
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum MentionedFile {
@@ -71,7 +144,7 @@ impl DocumentElement {
                             }
                         }
                     }
-                    return format!("{{{{embed [[{file}]]}}}}");
+                    format!("{{{{embed [[{file}]]}}}}")
                 }
             },
             Text(text) => {
@@ -192,11 +265,11 @@ impl DocumentComponent {
     /// file_dirs has the form Some(directory of the current file, directory images will be placed in) or None.
     /// If given, this information is used to update image embeds
     fn to_logseq_text(&self, file_dirs: &Option<(PathBuf, PathBuf)>) -> String {
-        [self.element.to_logseq_text(&file_dirs)]
+        [self.element.to_logseq_text(file_dirs)]
             .into_iter()
             .chain(self.children.iter().map(|c| {
                 let mut res = String::new();
-                c.to_logseq_text(&file_dirs).lines().for_each(|line| {
+                c.to_logseq_text(file_dirs).lines().for_each(|line| {
                     let _ = res.write_str("\t");
                     let _ = res.write_str(line);
                 });
@@ -230,17 +303,6 @@ impl DocumentComponent {
     }
 }
 
-fn apply_substitutions(text: &str) -> String {
-    text.replace('−', "-")
-        .replace('∗', "*")
-        .replace('∈', "\\in ")
-        .replace("“", "\"")
-        .replace("”", "\"")
-        .replace("∃", "EXISTS")
-        .replace("’", "'")
-        .replace("–", "-")
-}
-
 pub fn convert_tree(
     root_dir: PathBuf,
     target_dir: PathBuf,
@@ -259,8 +321,7 @@ pub fn convert_tree(
         .map(|f| {
             let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
-            let file_dirs = imdir.clone().map(|imdir| (f.clone(), imdir));
-            convert_file(f, &target, mode, &file_dirs)
+            convert_file(f, &target, mode, imdir)
         })
         .collect::<Result<Vec<Vec<String>>>>();
     match mentioned_files {
@@ -273,26 +334,18 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     file: T,
     out_file: U,
     mode: &str,
-    file_dirs: &Option<(PathBuf, PathBuf)>,
+    imdir: &Option<PathBuf>,
 ) -> Result<Vec<String>> {
     let file = file.as_ref();
     let file = file.canonicalize()?;
-    let text = std::fs::read_to_string(&file)?;
-    let text = apply_substitutions(&text);
-    let file_dir = file
-        .parent()
-        .context(format!("Could get parent of {file:?}!"))?;
-    let components = match mode {
-        "Obsidian" => parse_obsidian(&text, &Some(file_dir.to_path_buf())),
+    let pd = match mode {
+        "Obsidian" => parse_obsidian_file(&file),
         _ => panic!("Unsupported mode: {mode}"),
     };
 
-    if let Ok(components) = components {
-        let mentioned_files = components
-            .iter()
-            .flat_map(|c| c.mentioned_files().into_iter())
-            .collect();
-        let text = to_logseq_text(&components, file_dirs);
+    if let Ok(pd) = pd {
+        let mentioned_files = pd.mentioned_files();
+        let text = pd.to_logseq_text(imdir.clone());
 
         let res =
             std::fs::write(&out_file, text).context(format!("Failed to write to {out_file:?}"));
@@ -301,7 +354,7 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
         }
         Ok(mentioned_files)
     } else {
-        bail!("Could not convert the file {file:?} to obsidian: {components:?}")
+        bail!("Could not convert the file {file:?} to obsidian: {pd:?}")
     }
 }
 
@@ -332,48 +385,6 @@ pub fn files_in_tree<T: AsRef<Path>>(
         bail!("Encountered error: {tmp:?}!")
     }
     Ok(res)
-}
-
-pub fn to_logseq_text(
-    components: &[DocumentComponent],
-    file_dirs: &Option<(PathBuf, PathBuf)>,
-) -> String {
-    let mut res = String::new();
-    let mut last_empty = false;
-    components.iter().for_each(|c| {
-        if res.is_empty() && c.to_logseq_text(file_dirs).trim().is_empty() {
-            // do nothing
-        } else if c.is_empty_lines() {
-            if !res.is_empty() {
-                last_empty = true;
-            }
-        } else {
-            let text = c.to_logseq_text(file_dirs);
-            if last_empty {
-                let indent = " ".repeat(indent_level(&text, 4));
-                res.push('\n');
-                if text.trim().starts_with('-') {
-                    res.push_str(&text);
-                } else {
-                    text.lines().enumerate().for_each(|(index, line)| {
-                        if index == 0 {
-                            res.push_str(&indent);
-                            res.push_str("- ");
-                        } else {
-                            res.push('\n');
-                            res.push_str(&indent);
-                        }
-                        res.push_str(line);
-                    });
-                }
-            } else {
-                res.push_str(&text);
-            }
-            last_empty = false;
-        }
-    });
-    let res = res.trim_end().to_string();
-    res
 }
 
 pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent> {
