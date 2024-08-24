@@ -184,7 +184,7 @@ fn parse_adnote(
             ObsidianToken::TripleBackQuote => {
                 let text = text.trim_start_matches("\n").trim_end_matches("\n");
                 let mut properties = HashMap::new();
-                let mut body_lines = vec![];
+                let mut body_text = String::new();
                 // parse additional properties
                 for line in text.lines() {
                     if line.starts_with("title: ") {
@@ -194,11 +194,13 @@ fn parse_adnote(
                         let remainder = line.strip_prefix("color: ").unwrap();
                         properties.insert("color".to_string(), remainder.trim().to_string());
                     } else {
-                        body_lines.push(line);
+                        if !body_text.is_empty() {
+                            body_text.push('\n');
+                        }
+                        body_text.push_str(line);
                     }
                 }
-                let text = body_lines.join("\n");
-                let pd = parse_obsidian_text(&text, file_dir)?;
+                let pd = parse_obsidian_text(&body_text, file_dir)?;
                 return Ok(DocumentElement::Admonition(
                     pd.into_components(),
                     properties,
