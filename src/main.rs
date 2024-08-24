@@ -3,11 +3,14 @@ use clap::{Parser, Subcommand};
 mod file_checklist;
 use document_component::{convert_file, convert_tree, files_in_tree};
 use file_checklist::checklist_for_tree;
+use parse::ParseMode;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
 
 mod obsidian_parsing;
+mod parse;
+mod util;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -29,8 +32,12 @@ enum Commands {
         out_path: PathBuf,
 
         /// parsing mode
-        #[arg(short, long)]
-        mode: Option<String>,
+        #[arg(value_enum)]
+        inmode: ParseMode,
+
+        /// parsing mode
+        #[arg(value_enum)]
+        outmode: ParseMode,
 
         /// image directory for the input files. If this is set, found image files will be copied to the output image dir `imout` (required in this case)
         #[arg(long)]
@@ -81,18 +88,19 @@ fn run() -> Result<()> {
         Some(Commands::Convert {
             in_path,
             out_path,
-            mode,
+            inmode,
+            outmode: _,
             imdir,
             imout,
         }) => {
             if imdir.is_none() && imout.is_some() || imdir.is_some() && imout.is_none() {
                 bail!("Either both imdir and imout need to be specified or none of them!")
             }
-            let mode = mode.unwrap_or("Obsidian".to_string());
+
             let mentioned_files = if in_path.is_dir() {
-                convert_tree(in_path, out_path, &mode, &imout)
+                convert_tree(in_path, out_path, inmode, &imout)
             } else {
-                convert_file(in_path, out_path, &mode, &imdir)
+                convert_file(in_path, out_path, inmode, &imdir)
             }?;
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);

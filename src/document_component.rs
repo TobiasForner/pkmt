@@ -6,9 +6,12 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
-use crate::obsidian_parsing::parse_obsidian_file;
+use crate::{
+    parse::{parse_file, ParseMode},
+    util::indent_level,
+};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedDocument {
     ParsedFile(Vec<DocumentComponent>, PathBuf),
     ParsedText(Vec<DocumentComponent>),
@@ -306,7 +309,7 @@ impl DocumentComponent {
 pub fn convert_tree(
     root_dir: PathBuf,
     target_dir: PathBuf,
-    mode: &str,
+    inmode: ParseMode,
     imdir: &Option<PathBuf>,
 ) -> Result<Vec<String>> {
     let root_dir = root_dir.canonicalize()?;
@@ -321,7 +324,7 @@ pub fn convert_tree(
         .map(|f| {
             let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
-            convert_file(f, &target, mode, imdir)
+            convert_file(f, &target, inmode.clone(), imdir)
         })
         .collect::<Result<Vec<Vec<String>>>>();
     match mentioned_files {
@@ -333,15 +336,12 @@ pub fn convert_tree(
 pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     file: T,
     out_file: U,
-    mode: &str,
+    inmode: ParseMode,
     imdir: &Option<PathBuf>,
 ) -> Result<Vec<String>> {
     let file = file.as_ref();
     let file = file.canonicalize()?;
-    let pd = match mode {
-        "Obsidian" => parse_obsidian_file(&file),
-        _ => panic!("Unsupported mode: {mode}"),
-    };
+    let pd = parse_file(file.clone(), inmode);
 
     if let Ok(pd) = pd {
         let mentioned_files = pd.mentioned_files();
@@ -416,18 +416,6 @@ pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent>
     });
     if !text.is_empty() {
         res.push(DocumentComponent::new_text(&text));
-    }
-    res
-}
-
-fn indent_level(line: &str, spaces_per_indent: usize) -> usize {
-    let indent_pattern = " ".repeat(spaces_per_indent);
-    let line = line.replace("\t", &indent_pattern);
-    let mut res = 0;
-    let mut pos = 0;
-    while pos < line.len() && line[pos..].starts_with(&indent_pattern) {
-        res += 1;
-        pos += spaces_per_indent;
     }
     res
 }
