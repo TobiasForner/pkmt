@@ -110,6 +110,7 @@ pub enum DocumentElement {
     Text(String),
     /// text, map storing additional properties
     Admonition(Vec<DocumentComponent>, HashMap<String, String>),
+    ListElement(ParsedDocument, usize),
 }
 
 impl DocumentElement {
@@ -197,6 +198,19 @@ impl DocumentElement {
                 parts.push(body);
                 parts.push("#+END_QUOTE".to_string());
                 parts.join("\n")
+            }
+            ListElement(pd, level) => {
+                let text = pd.to_logseq_text(None);
+                let indent = "    ".repeat(*level);
+                let mut res = String::new();
+                text.lines().enumerate().for_each(|(i, l)| {
+                    res.push_str(&indent);
+                    if i == 0 {
+                        res.push_str("- ");
+                    }
+                    res.push_str(l);
+                });
+                res
             }
         }
     }
