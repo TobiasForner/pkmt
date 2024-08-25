@@ -11,6 +11,7 @@ use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
 
 mod inspect;
+mod logseq_parsing;
 
 mod obsidian_parsing;
 mod parse;
