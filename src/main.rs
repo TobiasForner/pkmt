@@ -123,49 +123,41 @@ fn run() -> Result<()> {
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);
 
-            if let Some(imdir) = imdir {
-                if let Some(imout) = imout {
-                    let found_image_files = files_in_tree(&imdir, &Some(vec!["png"]))?;
-                    //println!("{found_image_files:?}");
-                    let matched_files: Vec<PathBuf> = found_image_files
-                        .into_iter()
-                        .filter(|f| {
-                            let Some(file_name) = f.file_name() else {
-                                return false;
-                            };
-                            let Some(file_name) = file_name.to_str() else {
-                                return false;
-                            };
-                            if mentioned_files.contains(file_name) {
-                                return true;
-                            }
-                            let file_name = PathBuf::from(file_name);
-                            let Some(file_name) = file_name.file_stem() else {
-                                return false;
-                            };
-                            let Some(file_name) = file_name.to_str() else {
-                                return false;
-                            };
-                            if mentioned_files.contains(file_name) {
-                                return true;
-                            }
-                            false
-                        })
-                        .collect();
+            if let (Some(imdir), Some(imout)) = (imdir, imout) {
+                let found_image_files = files_in_tree(&imdir, &Some(vec!["png"]))?;
+                let matched_files: Vec<PathBuf> = found_image_files
+                    .into_iter()
+                    .filter(|f| {
+                        let Some(file_name) = f.file_name() else {
+                            return false;
+                        };
+                        let Some(file_name) = file_name.to_str() else {
+                            return false;
+                        };
+                        if mentioned_files.contains(file_name) {
+                            return true;
+                        }
+                        let file_name = PathBuf::from(file_name);
+                        let Some(file_name) = file_name.file_stem() else {
+                            return false;
+                        };
+                        let Some(file_name) = file_name.to_str() else {
+                            return false;
+                        };
+                        if mentioned_files.contains(file_name) {
+                            return true;
+                        }
+                        false
+                    })
+                    .collect();
 
-                    let imdir = imdir.canonicalize()?;
-                    let imout = imout.canonicalize()?;
-                    if !imout.exists() {
-                        std::fs::create_dir(&imout)?;
-                    }
-                    let _: () = matched_files.into_iter().try_for_each(|f| {
-                        let rel = pathdiff::diff_paths(&f, &imdir)
-                            .context(format!("Could not get relative path for {:?}", f))?;
-                        let target = imout.join(&rel);
-                        std::fs::copy(f, target)?;
-                        Ok::<(), anyhow::Error>(())
-                    })?;
-                }
+                let _: () = matched_files.into_iter().try_for_each(|f| {
+                    let rel = pathdiff::diff_paths(&f, &imdir)
+                        .context(format!("Could not get relative path for {:?}", f))?;
+                    let target = imout.join(&rel);
+                    std::fs::copy(f, target)?;
+                    Ok::<(), anyhow::Error>(())
+                })?;
             }
             Ok(())
         }
