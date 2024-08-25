@@ -234,25 +234,35 @@ impl DocumentElement {
                             last_empty = false;
                         }
                     });
-                    res_lines.join("\n")
+                    let mut res = res_lines.join("\n");
+                    if text.ends_with('\n') {
+                        res.push('\n');
+                    }
+                    res
                 }
             }
             Admonition(s, props) => {
-                let mut parts = vec!["#+BEGIN_QUOTE".to_string()];
+                let mut res = "- #+BEGIN_QUOTE".to_string();
                 if let Some(title) = props.get("title") {
-                    parts.push(format!("**{title}**"));
+                    res.push('\n');
+                    res.push_str("**");
+                    res.push_str(title);
+                    res.push_str("**");
                 }
                 let body = s
                     .iter()
                     .map(|c| c.to_logseq_text(file_info))
                     .collect::<Vec<String>>()
                     .join("");
-                parts.push(body);
-                parts.push("#+END_QUOTE".to_string());
-                parts.join("\n")
+                let body = body.trim();
+                res.push('\n');
+                res.push_str(body);
+                res.push('\n');
+                res.push_str("#+END_QUOTE");
+                res
             }
             ListElement(pd, level) => {
-                let text = pd.to_logseq_text(&None);
+                let text = pd.to_logseq_text(&file_info);
                 let indent = "    ".repeat(*level);
                 let mut res = String::new();
                 text.lines().enumerate().for_each(|(i, l)| {

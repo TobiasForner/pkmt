@@ -171,7 +171,7 @@ fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement
             ),
         }
     }
-    bail!("Failed to parse heading!")
+    Ok(DocumentElement::Heading(level, text))
 }
 
 fn parse_adnote(
@@ -375,5 +375,44 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
+    }
+}
+
+#[test]
+fn test_image_embed_conversion() {
+    let test_text =
+        "variables will become nonzero, so we only need to keep track of these nonzero variables.
+
+#### Initial Algorithm";
+    let res = parse_obsidian_text(test_text, &None);
+    if let Ok(pd) = res {
+        println!("{pd:?}");
+        let logseq_text = pd.to_logseq_text(&None);
+        let expected_text = "variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
+        assert_eq!(logseq_text, expected_text);
+    } else {
+        println!("Error: {res:?}");
+        assert!(false);
+    }
+}
+
+#[test]
+fn test_admonition_in_between() {
+    let test_text= "This leads to the following observation.
+```ad-note
+title: Observation 7.2
+For any path $P$ of vertices of degree two in graph $G$, Algorithm 7.2 will choose at most one vertex from $P$; that is, $|S \\cap P| \\leq 1$ for the final solution $S$ given by the algorithm.
+```
+##### *Proof*
+Once $S$ contains a vertex ";
+    let res = parse_obsidian_text(test_text, &None);
+    if let Ok(pd) = res {
+        println!("{pd:?}");
+        let logseq_text = pd.to_logseq_text(&None);
+        let expected_text = "variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
+        assert_eq!(logseq_text, expected_text);
+    } else {
+        println!("Error: {res:?}");
+        assert!(false);
     }
 }
