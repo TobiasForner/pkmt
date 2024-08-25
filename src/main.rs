@@ -3,11 +3,14 @@ use clap::{Parser, Subcommand};
 mod file_checklist;
 use document_component::{convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
+use inspect::list_empty_files;
 use parse::ParseMode;
 use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
+
+mod inspect;
 
 mod obsidian_parsing;
 mod parse;
@@ -60,6 +63,11 @@ enum Commands {
         #[arg(required = true)]
         todo_marker: String,
     },
+    Inspect {
+        /// root directory to inspect
+        #[arg(required = true)]
+        root_dir: PathBuf,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -86,6 +94,7 @@ fn run() -> Result<()> {
                 .context(format!("Could not write checklist to {out_file:?}!"))?;
             Ok(())
         }
+        Some(Commands::Inspect { root_dir }) => list_empty_files(root_dir),
         Some(Commands::Convert {
             in_path,
             out_path,
