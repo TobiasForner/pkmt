@@ -364,7 +364,7 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
 ";
     let res = parse_obsidian_text(text, &None);
     if let Ok(res) = res {
-        let res = res.to_logseq_text(None);
+        let res = res.to_logseq_text(&None);
         let expected = r"- ## Basic Definitions
 {{embed [[ApproximationAlgorithm]]}}
 - #+BEGIN_QUOTE

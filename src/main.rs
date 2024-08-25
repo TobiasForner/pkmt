@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 mod file_checklist;
-use document_component::{convert_file, convert_tree};
+use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
 use inspect::list_empty_files;
 use parse::ParseMode;
@@ -104,14 +104,21 @@ fn run() -> Result<()> {
             imdir,
             imout,
         }) => {
-            if imdir.is_none() && imout.is_some() || imdir.is_some() && imout.is_none() {
-                bail!("Either both imdir and imout need to be specified or none of them!")
+            let mut imdir = imdir;
+            let mut imout = imout;
+            if let (Some(im_in), Some(im_out)) = (&imdir, &imout) {
+                if !im_out.exists() {
+                    std::fs::create_dir_all(&im_out)?;
+                }
+                imdir = Some(im_in.canonicalize()?);
+                imout = Some(im_out.canonicalize()?);
             }
-
             let mentioned_files = if in_path.is_dir() {
-                convert_tree(in_path, out_path, inmode, &imout)
+                convert_tree(in_path, out_path, inmode, &imdir, &imout)
             } else {
-                convert_file(in_path, out_path, inmode, &imdir)
+                let file_info =
+                    FileInfo::try_new(in_path, Some(out_path), imdir.clone(), imout.clone())?;
+                convert_file(file_info, inmode)
             }?;
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);

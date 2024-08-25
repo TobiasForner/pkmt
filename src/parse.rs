@@ -28,7 +28,7 @@ impl ValueEnum for ParseMode {
     }
 }
 
-pub fn parse_file(file: PathBuf, mode: ParseMode) -> Result<ParsedDocument> {
+pub fn parse_file(file: &PathBuf, mode: ParseMode) -> Result<ParsedDocument> {
     match mode {
         ParseMode::Obsidian => parse_obsidian_file(file),
         ParseMode::LogSeq => parse_logseq_file(file),
