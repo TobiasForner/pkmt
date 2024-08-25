@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::{
     parse::{parse_file, ParseMode},
-    util::indent_level,
+    util::{files_in_tree, indent_level},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -356,35 +356,6 @@ pub fn convert_file<T: AsRef<Path> + Debug, U: AsRef<Path> + Debug>(
     } else {
         bail!("Could not convert the file {file:?} to obsidian: {pd:?}")
     }
-}
-
-pub fn files_in_tree<T: AsRef<Path>>(
-    root_dir: T,
-    allowed_extensions: &Option<Vec<&str>>,
-) -> Result<Vec<PathBuf>> {
-    let mut res = vec![];
-    let root_dir = root_dir.as_ref().canonicalize()?;
-    let dir_entry = root_dir.read_dir()?;
-    let tmp: Result<()> = dir_entry.into_iter().try_for_each(|f| {
-        let path = f.unwrap().path();
-        if path.is_dir() {
-            let rec = files_in_tree(&path, allowed_extensions)?;
-            res.extend(rec);
-        } else if let Some(ext) = path.extension() {
-            if let Some(extensions) = allowed_extensions {
-                if extensions.contains(&ext.to_str().unwrap_or("should not be found")) {
-                    res.push(path.clone());
-                }
-            } else {
-                res.push(path.clone());
-            }
-        }
-        Ok(())
-    });
-    if tmp.is_err() {
-        bail!("Encountered error: {tmp:?}!")
-    }
-    Ok(res)
 }
 
 pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent> {

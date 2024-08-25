@@ -1,9 +1,10 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 mod file_checklist;
-use document_component::{convert_file, convert_tree, files_in_tree};
+use document_component::{convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
 use parse::ParseMode;
+use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
