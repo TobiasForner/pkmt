@@ -97,7 +97,7 @@ impl ParsedDocument {
                 }
             } else {
                 if last_empty {
-                    let indent = " ".repeat(indent_level(&text, 4));
+                    let indent = " ".repeat(indent_level(&text));
                     res.push('\n');
                     if text.trim().starts_with('-') {
                         res.push_str(&text);
@@ -224,7 +224,7 @@ impl DocumentElement {
                                 if line.trim().starts_with('-') {
                                     res_lines.push(line.clone());
                                 } else {
-                                    let indent = " ".repeat(indent_level(line, 4));
+                                    let indent = " ".repeat(indent_level(line));
                                     let line = line.trim();
                                     res_lines.push(format!("\n{indent}- {line}"));
                                 }

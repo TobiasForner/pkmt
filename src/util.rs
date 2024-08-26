@@ -2,14 +2,16 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-pub fn indent_level(line: &str, spaces_per_indent: usize) -> usize {
-    let indent_pattern = " ".repeat(spaces_per_indent);
+const SPACES_PER_INDENT: usize = 4;
+
+pub fn indent_level(line: &str) -> usize {
+    let indent_pattern = " ".repeat(SPACES_PER_INDENT);
     let line = line.replace("\t", &indent_pattern);
     let mut res = 0;
     let mut pos = 0;
     while pos < line.len() && line[pos..].starts_with(&indent_pattern) {
         res += 1;
-        pos += spaces_per_indent;
+        pos += SPACES_PER_INDENT;
     }
     res
 }

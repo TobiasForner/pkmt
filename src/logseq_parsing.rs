@@ -86,7 +86,7 @@ pub fn parse_logseq_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Parse
                 Minus => {
                     if new_line_or_whitespace {
                         let line = text.lines().last().context("No last line!")?;
-                        let indent = indent_level(line, 4);
+                        let indent = indent_level(line);
                         let (de, rem) = parse_list_element(&mut lexer, indent, file_dir)?;
                         res.push(DocumentComponent::new(de));
                         let rec = parse_logseq_text(&rem, file_dir)?;
@@ -122,7 +122,7 @@ fn parse_list_element(
         match result {
             Ok(token) => match token {
                 Newline => {
-                    if indent_level(&remainder, 4) == indent {
+                    if indent_level(&remainder) == indent {
                         text.push_str(&remainder);
                         text.push_str(lexer.slice());
                         remainder = String::new();
