@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 mod file_checklist;
 use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
-use inspect::list_empty_files;
+use inspect::{list_empty_files, similar_file_names};
 use parse::ParseMode;
 use util::files_in_tree;
 
@@ -95,7 +95,11 @@ fn run() -> Result<()> {
                 .context(format!("Could not write checklist to {out_file:?}!"))?;
             Ok(())
         }
-        Some(Commands::Inspect { root_dir }) => list_empty_files(root_dir),
+        Some(Commands::Inspect { root_dir }) => {
+            list_empty_files(root_dir.clone())?;
+            similar_file_names(root_dir, 4);
+            Ok(())
+        }
         Some(Commands::Convert {
             in_path,
             out_path,
