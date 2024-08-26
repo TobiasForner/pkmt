@@ -366,12 +366,12 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
     if let Ok(res) = res {
         let res = res.to_logseq_text(&None);
         let expected = r"- ## Basic Definitions
-{{embed [[ApproximationAlgorithm]]}}
-- #+BEGIN_QUOTE
-**Theorem**
-Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique]], unless P = NP.
-#+END_QUOTE
-- {{embed [[PTAS]]}}".to_string();
+    - {{embed [[ApproximationAlgorithm]]}}
+    - #+BEGIN_QUOTE
+    **Theorem**
+    Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique]], unless P = NP.
+    #+END_QUOTE
+    - {{embed [[PTAS]]}}".to_string();
         assert_eq!(res, expected);
     } else {
         assert!(false, "Got {res:?}")
@@ -388,7 +388,7 @@ fn test_image_embed_conversion() {
     if let Ok(pd) = res {
         println!("{pd:?}");
         let logseq_text = pd.to_logseq_text(&None);
-        let expected_text = "variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
+        let expected_text = "- variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
         assert_eq!(logseq_text, expected_text);
     } else {
         println!("Error: {res:?}");
@@ -409,7 +409,7 @@ Once $S$ contains a vertex ";
     if let Ok(pd) = res {
         println!("{pd:?}");
         let logseq_text = pd.to_logseq_text(&None);
-        let expected_text = "variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
+        let expected_text = "- This leads to the following observation.\n- #+BEGIN_QUOTE\n**Observation 7.2**\nFor any path $P$ of vertices of degree two in graph $G$, Algorithm 7.2 will choose at most one vertex from $P$; that is, $|S \\cap P| \\leq 1$ for the final solution $S$ given by the algorithm.\n#+END_QUOTE\n- ##### *Proof*\n    - Once $S$ contains a vertex".to_string();
         assert_eq!(logseq_text, expected_text);
     } else {
         println!("Error: {res:?}");

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-const SPACES_PER_INDENT: usize = 4;
+pub const SPACES_PER_INDENT: usize = 4;
 
 pub fn indent_level(line: &str) -> usize {
     let indent_pattern = " ".repeat(SPACES_PER_INDENT);

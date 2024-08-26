@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::{
     parse::{parse_file, ParseMode},
-    util::{files_in_tree, indent_level},
+    util::{self, files_in_tree, indent_level},
 };
 
 #[derive(Clone, Debug)]
@@ -86,38 +86,68 @@ impl ParsedDocument {
     }
     pub fn to_logseq_text(&self, file_info: &Option<FileInfo>) -> String {
         let mut res = String::new();
-        let mut last_empty = false;
+        let mut new_block = true;
+        let mut heading_level_stack = vec![];
         self.components().iter().for_each(|c| {
-            let text = c.to_logseq_text(file_info);
-            if res.is_empty() && text.trim().is_empty() {
-                // do nothing
-            } else if c.is_empty_lines() {
-                if !res.is_empty() {
-                    last_empty = true;
+            println!("{c:?}; {heading_level_stack:?}");
+            let is_heading = if let DocumentElement::Heading(level, _) = c.element {
+                if heading_level_stack.is_empty() {
+                    heading_level_stack.push(level as usize);
+                } else {
+                    let level = level as usize;
+                    // while last heading has higher or same level: pop from stack
+                    while let Some(l) = heading_level_stack.pop() {
+                        if l < level {
+                            heading_level_stack.push(l);
+                            break;
+                        } else if l == level {
+                            break;
+                        }
+                    }
+                    // now: level is > than last level on stack (if there is any)
+                    // we simply push the new level
+                    heading_level_stack.push(level);
                 }
+                true
             } else {
-                if last_empty {
-                    let indent = " ".repeat(indent_level(&text));
-                    res.push('\n');
-                    if text.trim().starts_with('-') {
-                        res.push_str(&text);
+                false
+            };
+
+            let text = c.to_logseq_text(file_info);
+            if text.trim().is_empty() || c.is_empty_lines() {
+                // do nothing
+            } else {
+                if new_block || c.should_have_own_block() {
+                    let hl = if is_heading {
+                        heading_level_stack.len().saturating_sub(1)
                     } else {
-                        text.lines().enumerate().for_each(|(index, line)| {
-                            if index == 0 {
-                                res.push_str(&indent);
-                                res.push_str("- ");
-                            } else {
-                                res.push('\n');
+                        heading_level_stack.len()
+                    };
+                    let indent = " ".repeat(hl * util::SPACES_PER_INDENT);
+                    println!("new block: {c:?}; hl: {hl}; text: {text:?}");
+                    if !res.is_empty() && !text.starts_with('\n') {
+                        res.push('\n');
+                    }
+                    text.lines().enumerate().for_each(|(index, line)| {
+                        println!("line {line:?}");
+                        if index == 0 {
+                            if !line.is_empty() {
                                 res.push_str(&indent);
                             }
-                            res.push_str(line);
-                        });
-                    }
+                            if !text.trim().starts_with("- ") {
+                                res.push_str("- ");
+                            }
+                        } else {
+                            res.push('\n');
+                            res.push_str(&indent);
+                        }
+                        res.push_str(line);
+                    });
                 } else {
                     res.push_str(&text);
                 }
-                last_empty = false;
             }
+            new_block = c.should_have_own_block();
         });
         let res = res.trim_end().to_string();
         res
@@ -277,6 +307,18 @@ impl DocumentElement {
         }
     }
 
+    fn should_have_own_block(&self) -> bool {
+        use DocumentElement::*;
+        match self {
+            Text(_) => self.is_empty_lines(),
+            Heading(_, _) => true,
+            Admonition(_, _) => true,
+            FileEmbed(_, _) => true,
+            FileLink(_, _, _) => false,
+            ListElement(_, _) => true,
+        }
+    }
+
     fn is_empty_lines(&self) -> bool {
         match self {
             DocumentElement::Text(text) => text.trim().is_empty() && text.lines().count() > 1,
@@ -379,6 +421,10 @@ impl DocumentComponent {
                 .flat_map(|c| c.mentioned_files().into_iter()),
         );
         res
+    }
+
+    fn should_have_own_block(&self) -> bool {
+        self.element.should_have_own_block()
     }
 }
 
