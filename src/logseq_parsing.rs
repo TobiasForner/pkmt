@@ -63,7 +63,7 @@ pub fn parse_logseq_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Parse
     use LogSeqToken::*;
     //let text = apply_substitutions(text);
 
-    let mut lexer = LogSeqToken::lexer(&text);
+    let mut lexer = LogSeqToken::lexer(text);
     let mut res = vec![];
     let mut new_line_or_whitespace = true;
 
@@ -134,7 +134,7 @@ fn parse_list_element(
                 _ => text.push_str(lexer.slice()),
             },
             Err(_) => {
-                bail!("Error {}", construct_error_details(&lexer))
+                bail!("Error {}", construct_error_details(lexer))
             }
         }
     }

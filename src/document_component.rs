@@ -97,11 +97,15 @@ impl ParsedDocument {
                     let level = level as usize;
                     // while last heading has higher or same level: pop from stack
                     while let Some(l) = heading_level_stack.pop() {
-                        if l < level {
-                            heading_level_stack.push(l);
-                            break;
-                        } else if l == level {
-                            break;
+                        match l.cmp(&level) {
+                            std::cmp::Ordering::Less => {
+                                heading_level_stack.push(l);
+                                break;
+                            }
+                            std::cmp::Ordering::Equal => {
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                     // now: level is > than last level on stack (if there is any)
@@ -116,36 +120,34 @@ impl ParsedDocument {
             let text = c.to_logseq_text(file_info);
             if text.trim().is_empty() || c.is_empty_lines() {
                 // do nothing
-            } else {
-                if new_block || c.should_have_own_block() {
-                    let hl = if is_heading {
-                        heading_level_stack.len().saturating_sub(1)
-                    } else {
-                        heading_level_stack.len()
-                    };
-                    let indent = " ".repeat(hl * util::SPACES_PER_INDENT);
-                    println!("new block: {c:?}; hl: {hl}; text: {text:?}");
-                    if !res.is_empty() && !text.starts_with('\n') {
-                        res.push('\n');
-                    }
-                    text.lines().enumerate().for_each(|(index, line)| {
-                        println!("line {line:?}");
-                        if index == 0 {
-                            if !line.is_empty() {
-                                res.push_str(&indent);
-                            }
-                            if !text.trim().starts_with("- ") {
-                                res.push_str("- ");
-                            }
-                        } else {
-                            res.push('\n');
+            } else if new_block || c.should_have_own_block() {
+                let hl = if is_heading {
+                    heading_level_stack.len().saturating_sub(1)
+                } else {
+                    heading_level_stack.len()
+                };
+                let indent = " ".repeat(hl * util::SPACES_PER_INDENT);
+                println!("new block: {c:?}; hl: {hl}; text: {text:?}");
+                if !res.is_empty() && !text.starts_with('\n') {
+                    res.push('\n');
+                }
+                text.lines().enumerate().for_each(|(index, line)| {
+                    println!("line {line:?}");
+                    if index == 0 {
+                        if !line.is_empty() {
                             res.push_str(&indent);
                         }
-                        res.push_str(line);
-                    });
-                } else {
-                    res.push_str(&text);
-                }
+                        if !text.trim().starts_with("- ") {
+                            res.push_str("- ");
+                        }
+                    } else {
+                        res.push('\n');
+                        res.push_str(&indent);
+                    }
+                    res.push_str(line);
+                });
+            } else {
+                res.push_str(&text);
             }
             new_block = c.should_have_own_block();
         });
@@ -292,7 +294,7 @@ impl DocumentElement {
                 res
             }
             ListElement(pd, level) => {
-                let text = pd.to_logseq_text(&file_info);
+                let text = pd.to_logseq_text(file_info);
                 let indent = "    ".repeat(*level);
                 let mut res = String::new();
                 text.lines().enumerate().for_each(|(i, l)| {

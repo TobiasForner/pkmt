@@ -112,7 +112,7 @@ fn run() -> Result<()> {
             let mut imout = imout;
             if let (Some(im_in), Some(im_out)) = (&imdir, &imout) {
                 if !im_out.exists() {
-                    std::fs::create_dir_all(&im_out)?;
+                    std::fs::create_dir_all(im_out)?;
                 }
                 imdir = Some(im_in.canonicalize()?);
                 imout = Some(im_out.canonicalize()?);
