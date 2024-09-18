@@ -9,7 +9,6 @@ use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 mod document_component;
-
 mod inspect;
 mod logseq_parsing;
 
@@ -69,6 +68,10 @@ enum Commands {
         #[arg(required = true)]
         root_dir: PathBuf,
     },
+    Test {
+        #[arg(required = true)]
+        templates_file: PathBuf,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -98,6 +101,12 @@ fn run() -> Result<()> {
         Some(Commands::Inspect { root_dir }) => {
             list_empty_files(root_dir.clone())?;
             similar_file_names(root_dir, 4);
+            Ok(())
+        }
+        Some(Commands::Test { templates_file }) => {
+            println!("{templates_file:?}");
+            let pd = logseq_parsing::parse_logseq_file(&templates_file)?;
+            println!("{pd:?}\n\n{}", pd.to_logseq_text(&None));
             Ok(())
         }
         Some(Commands::Convert {

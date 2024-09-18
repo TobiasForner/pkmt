@@ -89,7 +89,7 @@ impl ParsedDocument {
         let mut new_block = true;
         let mut heading_level_stack = vec![];
         self.components().iter().for_each(|c| {
-            println!("{c:?}; {heading_level_stack:?}");
+            //println!("{c:?}; {heading_level_stack:?}");
             let is_heading = if let DocumentElement::Heading(level, _) = c.element {
                 if heading_level_stack.is_empty() {
                     heading_level_stack.push(level as usize);
@@ -138,6 +138,7 @@ impl ParsedDocument {
                             res.push_str(&indent);
                         }
                         if !text.trim().starts_with("- ") {
+                            println!("trim of {text:?} did not give '- ', adding...");
                             res.push_str("- ");
                         }
                     } else {
@@ -182,7 +183,11 @@ pub enum DocumentElement {
     Text(String),
     /// text, map storing additional properties
     Admonition(Vec<DocumentComponent>, HashMap<String, String>),
-    ListElement(ParsedDocument, usize),
+    /// inner text, type string
+    CodeBlock(String, Option<String>),
+
+    /// list item, map stores additional properties
+    ListElement(ParsedDocument, Vec<(String, String)>),
 }
 
 impl DocumentElement {
@@ -293,17 +298,49 @@ impl DocumentElement {
                 res.push_str("#+END_QUOTE");
                 res
             }
-            ListElement(pd, level) => {
+            CodeBlock(text, code_type) => {
+                let mut res = if let Some(ct) = code_type {
+                    format!("```{ct}\n")
+                } else {
+                    String::from("```\n")
+                };
+                res.push_str(text);
+                res.push('\n');
+                res.push_str("```");
+                res
+            }
+            ListElement(pd, properties) => {
                 let text = pd.to_logseq_text(file_info);
-                let indent = "    ".repeat(*level);
                 let mut res = String::new();
+                if !properties.is_empty() {
+                    properties
+                        .iter()
+                        .enumerate()
+                        .for_each(|(index, (key, value))| {
+                            let line = if value.is_empty() {
+                                format!("{key}::")
+                            } else {
+                                format!("{key}:: {value}")
+                            };
+                            if index > 0 {
+                                res.push_str("\n  ");
+                            } else {
+                                res.push_str("- ");
+                            }
+                            res.push_str(&line);
+                        });
+                }
                 text.lines().enumerate().for_each(|(i, l)| {
-                    res.push_str(&indent);
-                    if i == 0 {
+                    if res.is_empty() && i == 0 && !l.trim().starts_with("- ") {
                         res.push_str("- ");
+                    } else if i > 0 {
+                        res.push_str("\n  ");
                     }
                     res.push_str(l);
                 });
+                if res.is_empty() {
+                    res.push('-')
+                }
                 res
             }
         }
@@ -318,6 +355,7 @@ impl DocumentElement {
             FileEmbed(_, _) => true,
             FileLink(_, _, _) => false,
             ListElement(_, _) => true,
+            CodeBlock(_, _) => true,
         }
     }
 
@@ -379,26 +417,27 @@ impl DocumentElement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentComponent {
-    element: DocumentElement,
+    pub element: DocumentElement,
     children: Vec<Self>,
 }
 
 impl DocumentComponent {
     /// converts the component to logseq text
-    /// file_dirs has the form Some(directory of the current file, directory images will be placed in) or None.
-    /// If given, this information is used to update image embeds
+    /// If given, file_info is used to update image embeds
     fn to_logseq_text(&self, file_info: &Option<FileInfo>) -> String {
-        [self.element.to_logseq_text(file_info)]
+        let res = [self.element.to_logseq_text(file_info)]
             .into_iter()
             .chain(self.children.iter().map(|c| {
                 let mut res = String::new();
                 c.to_logseq_text(file_info).lines().for_each(|line| {
-                    let _ = res.write_str("\t");
+                    let _ = res.write_str("\n\t");
                     let _ = res.write_str(line);
                 });
                 res
             }))
-            .collect()
+            .collect();
+        println!("\n{self:?} \n-->\n {res:?}");
+        res
     }
 
     pub fn is_empty_lines(&self) -> bool {
@@ -409,6 +448,10 @@ impl DocumentComponent {
             element,
             children: vec![],
         }
+    }
+
+    pub fn new_with_children(element: DocumentElement, children: Vec<DocumentComponent>) -> Self {
+        Self { element, children }
     }
 
     pub fn new_text(text: &str) -> Self {
@@ -491,31 +534,108 @@ pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent>
     use DocumentElement::*;
     let mut text = String::new();
     let mut res: Vec<DocumentComponent> = vec![];
-    components.iter().for_each(|c| match &c.element {
-        Text(s) => {
-            text.push_str(s);
-        }
-        Admonition(components, properties) => {
-            if !text.is_empty() {
-                res.push(DocumentComponent::new_text(&text));
-                text = String::new();
+    components.iter().for_each(|c| {
+        let children = collapse_text(&c.children);
+        match &c.element {
+            Text(s) => {
+                text.push_str(s);
             }
-            let collapsed = collapse_text(components);
-            res.push(DocumentComponent::new(Admonition(
-                collapsed,
-                properties.clone(),
-            )));
-        }
-        _ => {
-            if !text.is_empty() {
-                res.push(DocumentComponent::new_text(&text));
-                text = String::new();
+            Admonition(components, properties) => {
+                if !text.is_empty() {
+                    res.push(DocumentComponent::new_text(&text));
+                    text = String::new();
+                }
+                let collapsed = collapse_text(components);
+                res.push(DocumentComponent::new_with_children(
+                    Admonition(collapsed, properties.clone()),
+                    children,
+                ));
             }
-            res.push(c.clone());
+            ListElement(pd, properties) => {
+                if !text.is_empty() {
+                    res.push(DocumentComponent::new_text(&text));
+                    text = String::new();
+                }
+
+                let comps = collapse_text(pd.components());
+
+                res.push(DocumentComponent::new_with_children(
+                    ListElement(ParsedDocument::ParsedText(comps), properties.clone()),
+                    children,
+                ));
+            }
+            _ => {
+                if !text.is_empty() {
+                    res.push(DocumentComponent::new_text(&text));
+                    text = String::new();
+                }
+                let mut c = c.clone();
+                c.children = children;
+                res.push(c);
+            }
         }
     });
     if !text.is_empty() {
         res.push(DocumentComponent::new_text(&text));
     }
     res
+}
+
+#[test]
+fn test_text_elem_to_logseq() {
+    let text = "line 1\n\t  line 2".to_string();
+    let elem = DocumentElement::Text(text.clone());
+    let res = elem.to_logseq_text(&None);
+
+    assert_eq!(res, text)
+}
+#[test]
+fn test_text_comp_to_logseq() {
+    let text = "line 1\n\t  line 2".to_string();
+    let comp = DocumentComponent::new_text(&text);
+    let res = comp.to_logseq_text(&None);
+
+    assert_eq!(res, text)
+}
+
+#[test]
+fn test_text_parsed_doc_to_logseq() {
+    let text = "line 1\n\t  line 2".to_string();
+    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new_text(&text)]);
+    let res = pd.to_logseq_text(&None);
+
+    assert_eq!(res, format!("- {text}"))
+}
+
+#[test]
+fn test_list_element_to_logseq() {
+    let text = "line 1\nline 2".to_string();
+    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new_text(&text)]);
+    let le = DocumentElement::ListElement(pd, vec![]);
+    let res = le.to_logseq_text(&None);
+
+    assert_eq!(res, format!("- line 1\n  line 2"));
+
+    let list_elem = DocumentElement::ListElement(
+        ParsedDocument::ParsedText(vec![]),
+        vec![
+            ("template".to_string(), "blog".to_string()),
+            ("tags".to_string(), "[[blog]]".to_string()),
+        ],
+    );
+
+    assert_eq!(
+        list_elem.to_logseq_text(&None),
+        "- template:: blog\n  tags:: [[blog]]".to_string()
+    );
+}
+
+#[test]
+fn test_comp_text_element_to_logseq() {
+    let text = "\n  source::\n  description::\n  url::";
+
+    let comp = DocumentComponent::new_text(text);
+    let res = comp.to_logseq_text(&None);
+    let expected = "\n- source::\n  description::\n  url::";
+    assert_eq!(res, expected);
 }

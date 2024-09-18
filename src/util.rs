@@ -1,8 +1,20 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
+use regex::Captures;
 
 pub const SPACES_PER_INDENT: usize = 4;
+
+pub fn apply_substitutions(text: &str) -> String {
+    text.replace('−', "-")
+        .replace('∗', "*")
+        .replace('∈', "\\in ")
+        .replace("“", "\"")
+        .replace("”", "\"")
+        .replace("∃", "EXISTS")
+        .replace("’", "'")
+        .replace("–", "-")
+}
 
 pub fn indent_level(line: &str) -> usize {
     let indent_pattern = " ".repeat(SPACES_PER_INDENT);
@@ -13,6 +25,54 @@ pub fn indent_level(line: &str) -> usize {
         res += 1;
         pos += SPACES_PER_INDENT;
     }
+    res
+}
+
+pub fn overlapping_captures(
+    text: &str,
+    re: regex::Regex,
+    move_after_ith_group: usize,
+) -> Vec<Captures<'_>> {
+    let mut pos = 0;
+    let mut res = vec![];
+    loop {
+        let Some(captures) = re.captures_at(text, pos) else {
+            return res;
+        };
+        pos = captures.get(move_after_ith_group).unwrap().end();
+        res.push(captures);
+    }
+}
+
+pub fn trim_like_first_line_plus(text: &str, extra: usize) -> String {
+    let indent_pattern = " ".repeat(SPACES_PER_INDENT);
+    let text = text.replace("\t", &indent_pattern);
+
+    let mut res = String::new();
+    let mut space_count = 0;
+    text.lines().enumerate().for_each(|(i, l)| {
+        let mut start = true;
+        if i == 0 {
+            l.chars().for_each(|c| {
+                if start && c == ' ' {
+                    space_count += 1;
+                } else {
+                    start = false;
+                    res.push(c);
+                }
+            })
+        } else {
+            res.push('\n');
+            l.chars().enumerate().for_each(|(char_pos, ch)| {
+                if ch != ' ' {
+                    start = false;
+                }
+                if !start || char_pos >= space_count + extra {
+                    res.push(ch);
+                }
+            });
+        }
+    });
     res
 }
 

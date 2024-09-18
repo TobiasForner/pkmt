@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::util::apply_substitutions;
 use anyhow::{bail, Context, Result};
 
 use crate::document_component::{
@@ -295,17 +296,6 @@ fn parse_file_link(
         }
     }
     bail!("Failed to parse file link!")
-}
-
-fn apply_substitutions(text: &str) -> String {
-    text.replace('−', "-")
-        .replace('∗', "*")
-        .replace('∈', "\\in ")
-        .replace("“", "\"")
-        .replace("”", "\"")
-        .replace("∃", "EXISTS")
-        .replace("’", "'")
-        .replace("–", "-")
 }
 
 #[test]
