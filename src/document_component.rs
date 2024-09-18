@@ -331,8 +331,6 @@ impl DocumentElement {
                             res.push_str(&line);
                         });
                 }
-                // if pd has empty components, we don't need to handle it
-                //if !pd.components().is_empty() {
                 text.lines().enumerate().for_each(|(i, l)| {
                     if res.is_empty() && i == 0 && !l.trim().starts_with("- ") {
                         res.push_str("- ");
@@ -341,7 +339,6 @@ impl DocumentElement {
                     }
                     res.push_str(l);
                 });
-                //}
                 if res.is_empty() {
                     res.push('-')
                 }
