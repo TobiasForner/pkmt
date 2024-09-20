@@ -330,7 +330,7 @@ A new line!
         )]);
         assert_eq!(res, expected);
     } else {
-        assert!(false, "Got {res:?}")
+        panic!("Got {res:?}")
     }
 }
 
@@ -345,7 +345,7 @@ fn test_text_parsing() {
         let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
         assert_eq!(res, expected);
     } else {
-        assert!(false, "Got {res:?}")
+        panic!("Got {res:?}")
     }
 }
 
@@ -374,7 +374,7 @@ Let $n$ denote the number of vertices in an input graph, and consider any consta
     - {{embed [[PTAS]]}}".to_string();
         assert_eq!(res, expected);
     } else {
-        assert!(false, "Got {res:?}")
+        panic!("Got {res:?}")
     }
 }
 
@@ -391,8 +391,7 @@ fn test_image_embed_conversion() {
         let expected_text = "- variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
         assert_eq!(logseq_text, expected_text);
     } else {
-        println!("Error: {res:?}");
-        assert!(false);
+        panic!("Error: {res:?}");
     }
 }
 
@@ -412,7 +411,6 @@ Once $S$ contains a vertex ";
         let expected_text = "- This leads to the following observation.\n- #+BEGIN_QUOTE\n**Observation 7.2**\nFor any path $P$ of vertices of degree two in graph $G$, Algorithm 7.2 will choose at most one vertex from $P$; that is, $|S \\cap P| \\leq 1$ for the final solution $S$ given by the algorithm.\n#+END_QUOTE\n- ##### *Proof*\n    - Once $S$ contains a vertex".to_string();
         assert_eq!(logseq_text, expected_text);
     } else {
-        println!("Error: {res:?}");
-        assert!(false);
+        panic!("Error: {res:?}");
     }
 }
