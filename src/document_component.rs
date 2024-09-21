@@ -78,6 +78,51 @@ impl ParsedDocument {
         }
     }
 
+    pub fn add_component(&mut self, component: DocumentComponent) {
+        match self {
+            ParsedDocument::ParsedFile(comps, _) => comps.push(component),
+            ParsedDocument::ParsedText(comps) => comps.push(component),
+        }
+    }
+    pub fn get_document_component(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<DocumentComponent> {
+        for comp in self.components() {
+            let rec = comp.get_document_component(selector);
+            if rec.is_some() {
+                return rec;
+            }
+        }
+
+        None
+    }
+
+    pub fn get_document_component_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<&mut DocumentComponent> {
+        use ParsedDocument::*;
+
+        let comps = match self {
+            ParsedFile(comps, _) => comps,
+            ParsedText(comps) => comps,
+        };
+        for comp in comps.iter_mut() {
+            let rec = comp.get_document_component_mut(selector);
+            if rec.is_some() {
+                return rec;
+            }
+        }
+
+        None
+    }
+    pub fn get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
+        match self {
+            ParsedDocument::ParsedFile(comps, _) => comps.get_mut(n),
+            ParsedDocument::ParsedText(comps) => comps.get_mut(n),
+        }
+    }
     fn mentioned_files(&self) -> Vec<String> {
         self.components()
             .iter()
@@ -226,7 +271,6 @@ impl DocumentElement {
                                 let dest_dir = dest_file.parent().unwrap();
                                 let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
                                 if let Some(rel) = rel {
-                                    println!("{name:?}: {ext}, {rel:?}");
                                     return format!(
                                         "![image.{ext}]({})",
                                         rel.to_string_lossy().replace("\\", "/")
@@ -347,6 +391,30 @@ impl DocumentElement {
         }
     }
 
+    pub fn get_document_component(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<DocumentComponent> {
+        use DocumentElement::*;
+        match self {
+            Admonition(comps, _) => comps.iter().find(|c| selector(c)).cloned(),
+            ListElement(pd, _) => pd.get_document_component(selector),
+            _ => None,
+        }
+    }
+
+    pub fn get_document_component_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<&mut DocumentComponent> {
+        use DocumentElement::*;
+        match self {
+            Admonition(comps, _) => comps.iter_mut().find(|c| selector(c)),
+            ListElement(pd, _) => pd.get_document_component_mut(selector),
+            _ => None,
+        }
+    }
+
     fn should_have_own_block(&self) -> bool {
         use DocumentElement::*;
         match self {
@@ -419,7 +487,7 @@ impl DocumentElement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentComponent {
     pub element: DocumentElement,
-    children: Vec<Self>,
+    pub children: Vec<Self>,
 }
 
 impl DocumentComponent {
@@ -456,6 +524,47 @@ impl DocumentComponent {
 
     pub fn new_text(text: &str) -> Self {
         Self::new(DocumentElement::Text(text.to_string()))
+    }
+
+    pub fn get_document_component(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<DocumentComponent> {
+        if selector(self) {
+            return Some(self.clone());
+        }
+        if let Some(dc) = self.element.get_document_component(&selector) {
+            return Some(dc.clone());
+        }
+        if let Some(dc) = self.children.iter().find(|c| selector(c)) {
+            return Some(dc.clone());
+        }
+
+        None
+    }
+
+    pub fn get_element_mut(&mut self) -> &mut DocumentElement {
+        &mut self.element
+    }
+    pub fn get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
+        self.children.get_mut(n)
+    }
+
+    pub fn get_document_component_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<&mut DocumentComponent> {
+        if selector(self) {
+            return Some(self);
+        }
+        if let Some(dc) = self.element.get_document_component_mut(&selector) {
+            return Some(dc);
+        }
+        if let Some(dc) = self.children.iter_mut().find(|c| selector(c)) {
+            return Some(dc);
+        }
+
+        None
     }
 
     fn mentioned_files(&self) -> Vec<String> {

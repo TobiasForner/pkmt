@@ -1,0 +1,28 @@
+use anyhow::{bail, Result};
+use std::str::FromStr;
+
+pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
+    let client = reqwest::Client::new();
+    let video_url = reqwest::Url::from_str(video_url)?;
+    if let Some((_, id)) = video_url.query_pairs().find(|(k, _)| k == "v") {
+        //        println!("{video_url}; {id}");
+
+        let res = client
+            .get("https://www.googleapis.com/youtube/v3/videos")
+            .query(&[("key", api_key), ("part", "snippet"), ("id", &id)])
+            .send();
+
+        let runtime = tokio::runtime::Runtime::new()?;
+        let res = runtime.block_on(res);
+
+        let text = runtime.block_on(res?.text())?;
+        let mut js = json::parse(&text)?;
+        let snippet = js["items"].pop()["snippet"].clone();
+        let title = snippet["title"].to_string();
+        let channel = snippet["channelTitle"].to_string();
+
+        Ok((title, channel))
+    } else {
+        bail!("Could not extract url from {video_url}!");
+    }
+}
