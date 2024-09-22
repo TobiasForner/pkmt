@@ -14,6 +14,7 @@ pub fn apply_substitutions(text: &str) -> String {
         .replace("∃", "EXISTS")
         .replace("’", "'")
         .replace("–", "-")
+        .replace("“", "\"")
 }
 
 pub fn indent_level(line: &str) -> usize {
