@@ -4,10 +4,12 @@ use anyhow::Result;
 use regex::Regex;
 
 use crate::{
-    document_component::{DocumentElement, ParsedDocument},
+    document_component::{DocumentComponent, ParsedDocument},
     logseq_parsing::parse_logseq_file,
-    todoi::todoist_api::{TodoistAPI, TodoistTask},
-    todoi::youtube_details::youtube_details,
+    todoi::{
+        todoist_api::{TodoistAPI, TodoistTask},
+        youtube_details::youtube_details,
+    },
 };
 
 pub fn main(
@@ -110,12 +112,20 @@ fn handle_youtube_tasks(
                 *props = new_props;
 
                 // add embed
+                //
+                println!("template comp: \n{yt_template_comp:?}");
                 let embed_block = yt_template_comp
                     .get_nth_child_mut(0)
                     .unwrap()
                     .get_nth_child_mut(0)
                     .unwrap();
-                embed_block.element = DocumentElement::Text(format!("{{{{video {video_url}}}}}"));
+
+                println!("embed block:\n{embed_block:?}");
+                let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new_text(&format!(
+                    "{{{{video {video_url}}}}}"
+                ))]);
+                let elem = ListElement(pd, vec![]);
+                embed_block.element = elem;
             }
 
             journal_file.add_component(yt_template_comp);
