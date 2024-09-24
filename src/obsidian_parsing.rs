@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -250,7 +251,9 @@ fn parse_file_link(
                         let file = file.canonicalize()?;
                         mf = MentionedFile::FilePath(file);
                     }
-                    let Ok(file) = PathBuf::from_str(&name);
+                    let Ok(file) = PathBuf::from_str(&name) else {
+                        panic!("should not happen: PathBuf::from_str failed with str input")
+                    };
 
                     if file.exists() {
                         mf = MentionedFile::FilePath(file.canonicalize()?);
