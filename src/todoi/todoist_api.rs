@@ -49,7 +49,7 @@ pub struct TodoistProject {
         "url": "https://todoist.com/showTask?id=2995104339"
     },
 */
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TodoistTask {
     id: String,
     pub content: String,

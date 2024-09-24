@@ -75,13 +75,9 @@ enum Commands {
     },
     Todoi {
         #[arg(required = true)]
-        yt_api_key: String,
-        #[arg(required = true)]
-        todoist_api_key: String,
-        #[arg(required = true)]
         template_file: PathBuf,
-        #[arg(short, long)]
-        complete_tasks: Option<bool>,
+        #[arg(short, long, default_value_t = false)]
+        complete_tasks: bool,
     },
 }
 
@@ -100,13 +96,10 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let res: Result<()> = match cli.command {
         Some(Commands::Todoi {
-            todoist_api_key,
             template_file,
-            yt_api_key,
             complete_tasks,
         }) => {
-            let complete_tasks = complete_tasks.unwrap_or(false);
-            todoi::todoi::main(&yt_api_key, &todoist_api_key, template_file, complete_tasks)?;
+            todoi::todoi::main(template_file, complete_tasks)?;
             Ok(())
         }
         Some(Commands::Checklist {
