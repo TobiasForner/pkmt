@@ -89,7 +89,6 @@ impl ParsedDocument {
         let mut new_block = true;
         let mut heading_level_stack = vec![];
         self.components().iter().for_each(|c| {
-            //println!("{c:?}; {heading_level_stack:?}");
             let is_heading = if let DocumentElement::Heading(level, _) = c.element {
                 if heading_level_stack.is_empty() {
                     heading_level_stack.push(level as usize);
@@ -127,18 +126,20 @@ impl ParsedDocument {
                     heading_level_stack.len()
                 };
                 let indent = " ".repeat(hl * util::SPACES_PER_INDENT);
-                println!("new block: {c:?}; hl: {hl}; text: {text:?}");
                 if !res.is_empty() && !text.starts_with('\n') {
                     res.push('\n');
                 }
                 text.lines().enumerate().for_each(|(index, line)| {
-                    println!("line {line:?}");
                     if index == 0 {
                         if !line.is_empty() {
                             res.push_str(&indent);
                         }
-                        if !text.trim().starts_with("- ") {
-                            println!("trim of {text:?} did not give '- ', adding...");
+                        let t = text.trim();
+                        if !(t.starts_with("- ")
+                            || t.starts_with("-\n")
+                            || t.starts_with("-\n\r")
+                            || t == "-")
+                        {
                             res.push_str("- ");
                         }
                     } else {
@@ -330,6 +331,8 @@ impl DocumentElement {
                             res.push_str(&line);
                         });
                 }
+                // if pd has empty components, we don't need to handle it
+                //if !pd.components().is_empty() {
                 text.lines().enumerate().for_each(|(i, l)| {
                     if res.is_empty() && i == 0 && !l.trim().starts_with("- ") {
                         res.push_str("- ");
@@ -338,6 +341,7 @@ impl DocumentElement {
                     }
                     res.push_str(l);
                 });
+                //}
                 if res.is_empty() {
                     res.push('-')
                 }
@@ -436,7 +440,6 @@ impl DocumentComponent {
                 res
             }))
             .collect();
-        println!("\n{self:?} \n-->\n {res:?}");
         res
     }
 
@@ -638,4 +641,15 @@ fn test_comp_text_element_to_logseq() {
     let res = comp.to_logseq_text(&None);
     let expected = "\n- source::\n  description::\n  url::";
     assert_eq!(res, expected);
+}
+
+#[test]
+fn test_almost_empty_pd_to_logseq() {
+    use DocumentElement::ListElement;
+    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new(ListElement(
+        ParsedDocument::ParsedText(vec![]),
+        vec![],
+    ))]);
+    let expected = "-";
+    assert_eq!(pd.to_logseq_text(&None), expected);
 }
