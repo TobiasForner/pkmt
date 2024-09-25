@@ -98,6 +98,16 @@ impl ParsedDocument {
         None
     }
 
+    pub fn with_components(&self, components: Vec<DocumentComponent>) -> ParsedDocument {
+        match self {
+            ParsedDocument::ParsedFile(_, file_info) => {
+                ParsedDocument::ParsedFile(components, file_info.to_path_buf())
+            }
+
+            ParsedDocument::ParsedText(_) => ParsedDocument::ParsedText(components),
+        }
+    }
+
     pub fn get_document_component_mut(
         &mut self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
@@ -510,6 +520,15 @@ impl DocumentComponent {
 
     pub fn is_empty_lines(&self) -> bool {
         self.element.is_empty_lines()
+    }
+    pub fn is_empty_list(&self) -> bool {
+        let element_empty = match &self.element {
+            DocumentElement::ListElement(pd, props) => {
+                pd.components().is_empty() && props.is_empty()
+            }
+            _ => false,
+        };
+        element_empty && self.children.is_empty()
     }
     pub fn new(element: DocumentElement) -> Self {
         Self {

@@ -54,15 +54,32 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
     let todays_journal_file = logseq_graph_root
         .join("journals")
         .join(today.format("%Y_%m_%d.md").to_string());
-    let mut todays_journal = if todays_journal_file.exists() {
+    let todays_journal = if todays_journal_file.exists() {
         println!("loaded existing journal file");
         parse_logseq_file(&todays_journal_file).unwrap()
     } else {
         println!("creating new journal file!");
         ParsedDocument::ParsedFile(vec![], todays_journal_file.clone())
     };
-    println!("{todays_journal:?}");
-    println!("{}", todays_journal.to_logseq_text(&None));
+
+    // remove empty list elements from the end of the journal
+    let mut end = true;
+    let filtered_components = todays_journal
+        .components()
+        .iter()
+        .rev()
+        .filter(|c| {
+            if !c.is_empty_list() {
+                end = false;
+                true
+            } else {
+                !end
+            }
+        })
+        .cloned()
+        .rev()
+        .collect();
+    let mut todays_journal = todays_journal.with_components(filtered_components);
     let templates = LogSeqTemplates::new(&logseq_graph_root)?;
 
     let tasks = handle_youtube_tasks(
