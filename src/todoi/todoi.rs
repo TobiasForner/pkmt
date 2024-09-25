@@ -9,7 +9,7 @@ use crate::{
     todoi::{
         config::Config,
         todoist_api::{TodoistAPI, TodoistTask},
-        youtube_details::youtube_details,
+        youtube_details::{youtube_details, youtube_playlist_details},
     },
 };
 
@@ -44,7 +44,6 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
     let config = Config::parse(PathBuf::from_str(
         "/mnt/c/Users/Tobias/AppData/Local/todoist_import/todoist_import/todoi_config.toml",
     )?);
-    println!("{config:?}");
     let todoist_api = TodoistAPI::new(&config.todoist_api_key);
     let inbox = todoist_api.get_inbox()?;
 
@@ -82,26 +81,38 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
     let mut todays_journal = todays_journal.with_components(filtered_components);
     let templates = LogSeqTemplates::new(&logseq_graph_root)?;
 
-    let tasks = handle_youtube_tasks(
-        &inbox_tasks,
-        &templates,
-        &mut todays_journal,
-        complete_tasks,
-        &config,
-        &todoist_api,
-    );
-    let tasks = handle_sbs_tasks(
-        &tasks,
-        &todoist_api,
-        complete_tasks,
-        &templates,
-        &mut todays_journal,
-    );
+    let mut completed_tasks =
+        handle_youtube_tasks(&inbox_tasks, &templates, &mut todays_journal, &config);
 
-    println!("remaining: {tasks:?}");
+    let remaining_tasks: Vec<TodoistTask> = inbox_tasks
+        .into_iter()
+        .filter(|task| !completed_tasks.contains(task))
+        .collect();
 
-    println!("final pd\n{}", todays_journal.to_logseq_text(&None));
+    let mut new_completions = handle_sbs_tasks(&remaining_tasks, &templates, &mut todays_journal);
+    completed_tasks.append(&mut new_completions);
+    let remaining_tasks: Vec<TodoistTask> = remaining_tasks
+        .into_iter()
+        .filter(|task| !new_completions.contains(task))
+        .collect();
+
+    let mut new_completions =
+        handle_youtube_playlists(&remaining_tasks, &templates, &mut todays_journal, &config);
+    completed_tasks.append(&mut new_completions);
+    let remaining_tasks: Vec<TodoistTask> = remaining_tasks
+        .into_iter()
+        .filter(|task| !new_completions.contains(task))
+        .collect();
+
+    println!("remaining: {remaining_tasks:?}");
+
     std::fs::write(todays_journal_file, todays_journal.to_logseq_text(&None))?;
+    if complete_tasks {
+        completed_tasks.iter().for_each(|t| {
+            println!("Completing: {}", t.content);
+            todoist_api.close_task(t);
+        });
+    }
     Ok(())
 }
 
@@ -109,9 +120,7 @@ fn handle_youtube_tasks(
     tasks: &[TodoistTask],
     templates: &LogSeqTemplates,
     journal_file: &mut ParsedDocument,
-    complete_tasks: bool,
     config: &Config,
-    todoist_api: &TodoistAPI,
 ) -> Vec<TodoistTask> {
     use crate::document_component::DocumentElement::ListElement;
     let yt_video_url_re =
@@ -122,7 +131,7 @@ fn handle_youtube_tasks(
         .get_template_comp("youtube")
         .expect("No youtube template!");
 
-    let completed_tasks: Vec<&TodoistTask> = tasks
+    tasks
         .iter()
         .filter_map(|task| yt_video_url_re.captures(&task.content).map(|m| (task, m)))
         .filter_map(|(task, c)| c.get(0).map(|m| (task, m.as_str())))
@@ -132,7 +141,6 @@ fn handle_youtube_tasks(
 
             // remove template tag and add new tags
             if let ListElement(_, props) = yt_template.get_element_mut() {
-                let mut new_props = vec![];
                 let (authors, video_title) = {
                     if let Ok((video_title, authors)) =
                         youtube_details(video_url, &config.yt_api_key)
@@ -149,25 +157,15 @@ fn handle_youtube_tasks(
                 }
 
                 tags.append(&mut config.get_keyword_tags(&video_title));
-                *props = fill_properties(props, &[("tags", &tags)], &["template"]);
-
-                props.iter().for_each(|(key, val)| match key.as_str() {
-                    "tags" => {
-                        let mut tags = vec![];
-                        if !val.trim().is_empty() {
-                            tags.push(val.to_string());
-                        }
-                        tags.dedup();
-                        new_props.push((key.clone(), tags.join(", ")));
-                    }
-                    "template" => {}
-                    "authors" => new_props.push(("authors".to_string(), format!("[[{authors}]]"))),
-                    "description" => {
-                        new_props.push(("descriptions".to_string(), video_title.clone()))
-                    }
-                    _ => new_props.push((key.to_string(), val.to_string())),
-                });
-                *props = new_props;
+                *props = fill_properties(
+                    props,
+                    &[
+                        ("tags", &tags),
+                        ("description", &[video_title]),
+                        ("authors", &[authors]),
+                    ],
+                    &["template"],
+                );
 
                 // add embed
                 let embed_block = yt_template
@@ -184,21 +182,51 @@ fn handle_youtube_tasks(
             }
 
             journal_file.add_component(yt_template);
-            println!("would complete {task:?}");
             task
         })
-        .collect();
-    let remaining_tasks = tasks
-        .iter()
-        .filter(|task| !completed_tasks.contains(task))
         .cloned()
-        .collect();
-    if complete_tasks {
-        completed_tasks.iter().for_each(|t| {
-            todoist_api.close_task(t);
-        });
-    }
-    remaining_tasks
+        .collect()
+}
+
+// returns completed tasks
+fn handle_youtube_playlists(
+    tasks: &[TodoistTask],
+    templates: &LogSeqTemplates,
+    journal_file: &mut ParsedDocument,
+    config: &Config,
+) -> Vec<TodoistTask> {
+    use crate::document_component::DocumentElement::ListElement;
+    let playlist_re = Regex::new(r"https://www\.youtube\.com/playlist\?list=[a-zA-Z0-9]+").unwrap();
+    tasks
+        .iter()
+        .filter_map(|task| playlist_re.captures(&task.content).map(|m| (task, m)))
+        .filter_map(|(task, c)| c.get(0).map(|m| (task, m.as_str())))
+        .filter_map(|(task, playlist_url)| {
+            let mut temp = templates.get_template_comp("youtube_playlist").unwrap();
+            if let ListElement(_, props) = temp.get_element_mut() {
+                if let Ok((description, channel)) =
+                    youtube_playlist_details(playlist_url, &config.yt_api_key)
+                {
+                    *props = fill_properties(
+                        props,
+                        &[
+                            ("description", &[description]),
+                            ("authors", &[channel]),
+                            ("url", &[playlist_url.to_string()]),
+                        ],
+                        &["template"],
+                    );
+                    journal_file.add_component(temp);
+                    Some(task)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .cloned()
+        .collect()
 }
 
 fn fill_properties(
@@ -227,8 +255,6 @@ fn fill_properties(
 
 fn handle_sbs_tasks(
     tasks: &[TodoistTask],
-    todoist_api: &TodoistAPI,
-    complete_tasks: bool,
     templates: &LogSeqTemplates,
     journal_file: &mut ParsedDocument,
 ) -> Vec<TodoistTask> {
@@ -238,7 +264,7 @@ fn handle_sbs_tasks(
     let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
 
     if let Some(comp) = templates.get_template_comp("article") {
-        let completed_tasks: Vec<TodoistTask> = tasks
+        tasks
             .iter()
             .filter_map(|t| sbs_link_re.captures(&t.content).map(|c| (t, c)))
             .filter_map(|(t, c)| c.get(0).map(|m| (t, m)))
@@ -258,18 +284,8 @@ fn handle_sbs_tasks(
                     None
                 }
             })
-            .collect();
-        let remaining_tasks = tasks
-            .iter()
-            .filter(|task| !completed_tasks.contains(task))
-            .cloned()
-            .collect();
-        if complete_tasks {
-            completed_tasks.iter().for_each(|t| {
-                todoist_api.close_task(t);
-            })
-        };
-        return remaining_tasks;
+            .collect()
+    } else {
+        vec![]
     }
-    tasks.to_vec()
 }
