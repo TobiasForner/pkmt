@@ -87,7 +87,7 @@ impl TodoistAPI {
     }
 
     pub fn close_task(&self, task: &TodoistTask) -> bool {
-        let res = self.req_base(&format!(
+        let res = self.req_base_post(&format!(
             "https://api.todoist.com/rest/v2/tasks/{}/close",
             task.id
         ));
@@ -107,6 +107,11 @@ impl TodoistAPI {
     fn req_base(&self, url: &str) -> reqwest::RequestBuilder {
         reqwest::Client::new()
             .get(url)
+            .header("Authorization", format!("Bearer {}", self.todoist_api_key))
+    }
+    fn req_base_post(&self, url: &str) -> reqwest::RequestBuilder {
+        reqwest::Client::new()
+            .post(url)
             .header("Authorization", format!("Bearer {}", self.todoist_api_key))
     }
 }
