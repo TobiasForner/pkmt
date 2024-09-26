@@ -27,7 +27,7 @@ impl Config {
         self.kw_tag
             .iter()
             .filter_map(|kt| {
-                if text.contains(&kt.keyword) {
+                if text.to_lowercase().contains(&kt.keyword.to_lowercase()) {
                     Some(kt.tags.iter())
                 } else {
                     None
