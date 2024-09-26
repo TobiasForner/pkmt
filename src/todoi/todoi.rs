@@ -162,9 +162,9 @@ fn handle_youtube_tasks(
                 *props = fill_properties(
                     props,
                     &[
-                        ("tags", &tags),
-                        ("description", &[video_title]),
-                        ("authors", &[authors]),
+                        ("tags", tags),
+                        ("description", vec![video_title]),
+                        ("authors", vec![format!("[[{authors}]]")]),
                     ],
                     &["template"],
                 );
@@ -212,9 +212,9 @@ fn handle_youtube_playlists(
                     *props = fill_properties(
                         props,
                         &[
-                            ("description", &[description]),
-                            ("authors", &[channel]),
-                            ("url", &[playlist_url.to_string()]),
+                            ("description", vec![description]),
+                            ("authors", vec![format!("[[{channel}]]")]),
+                            ("url", vec![playlist_url.to_string()]),
                         ],
                         &["template"],
                     );
@@ -233,7 +233,7 @@ fn handle_youtube_playlists(
 
 fn fill_properties(
     props: &[(String, String)],
-    add: &[(&str, &[String])],
+    add: &[(&str, Vec<String>)],
     drop: &[&str],
 ) -> Vec<(String, String)> {
     let mut res = vec![];
@@ -272,14 +272,31 @@ fn handle_sbs_tasks(
             .filter_map(|(t, c)| c.get(0).map(|m| (t, m)))
             .filter_map(|(task, text)| {
                 let mut comp = comp.clone();
-                let text = text.as_str();
+                let article_url = text.as_str();
+
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                let res = runtime.block_on(reqwest::get(article_url)).unwrap();
+                let text = runtime.block_on(res.text()).unwrap();
+
+                println!("{}", &text[0..1000]);
 
                 if let ListElement(_, props) = comp.get_element_mut() {
                     let mut source = vec!["[[Stronger by Science]]".to_string()];
-                    if let Some(author) = author_re.captures(text) {
-                        source.push(author.get(0).unwrap().as_str().to_string());
+                    if let Some(author) = author_re.captures(&text) {
+                        let mut author = author.get(1).unwrap().as_str().to_string();
+                        if author.ends_with('.') {
+                            author.remove(author.len() - 1);
+                        }
+                        source.push(format!("[[{author}]]"));
                     }
-                    *props = fill_properties(props, &[("source", &source)], &["template"]);
+                    let url = vec![article_url.to_string()];
+                    let mut add: Vec<(&str, Vec<String>)> = vec![("source", source), ("url", url)];
+                    if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>"))
+                    {
+                        let title = vec![text[start + 7..end].to_string()];
+                        add.push(("description", title));
+                    }
+                    *props = fill_properties(props, &add, &["template"]);
                     journal_file.add_component(comp);
                     Some(task.clone())
                 } else {
