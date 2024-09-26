@@ -157,6 +157,8 @@ fn handle_youtube_tasks(
                 }
 
                 tags.append(&mut config.get_keyword_tags(&video_title));
+                tags.sort();
+                tags.dedup();
                 *props = fill_properties(
                     props,
                     &[
