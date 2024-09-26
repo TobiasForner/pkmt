@@ -75,7 +75,7 @@ enum Commands {
     },
     Todoi {
         #[arg(required = true)]
-        template_file: PathBuf,
+        graph_root: PathBuf,
         #[arg(short, long, default_value_t = false)]
         complete_tasks: bool,
     },
@@ -96,10 +96,10 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let res: Result<()> = match cli.command {
         Some(Commands::Todoi {
-            template_file,
+            graph_root,
             complete_tasks,
         }) => {
-            todoi::todoi::main(template_file, complete_tasks)?;
+            todoi::todoi::main(graph_root, complete_tasks)?;
             Ok(())
         }
         Some(Commands::Checklist {
