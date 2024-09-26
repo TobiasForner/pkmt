@@ -273,16 +273,13 @@ fn handle_sbs_tasks(
             .filter_map(|(t, c)| c.get(0).map(|m| (t, m)))
             .filter_map(|(task, text)| {
                 let mut comp = comp.clone();
-                let article_url = text.as_str();
-
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                let res = runtime.block_on(reqwest::get(article_url)).unwrap();
-                let text = runtime.block_on(res.text()).unwrap();
-
-                println!("{}", &text[0..1000]);
-
                 if let ListElement(_, props) = comp.get_element_mut() {
+                    let article_url = text.as_str();
+
                     let mut source = vec!["[[Stronger by Science]]".to_string()];
+                    let runtime = tokio::runtime::Runtime::new().unwrap();
+                    let res = runtime.block_on(reqwest::get(article_url)).unwrap();
+                    let text = runtime.block_on(res.text()).unwrap();
                     if let Some(author) = author_re.captures(&text) {
                         let mut author = author.get(1).unwrap().as_str().to_string();
                         if author.ends_with('.') {
@@ -290,8 +287,13 @@ fn handle_sbs_tasks(
                         }
                         source.push(format!("[[{author}]]"));
                     }
+
                     let url = vec![article_url.to_string()];
-                    let mut add: Vec<(&str, Vec<String>)> = vec![("source", source), ("url", url)];
+                    let mut add: Vec<(&str, Vec<String>)> = vec![
+                        ("source", source),
+                        ("url", url),
+                        ("tags", vec!["#Fitness".to_string()]),
+                    ];
                     if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>"))
                     {
                         let title = vec![text[start + 7..end].to_string()];
