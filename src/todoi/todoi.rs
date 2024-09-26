@@ -48,6 +48,7 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
     let inbox = todoist_api.get_inbox()?;
 
     let inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
+    println!("Retrieved todoist tasks.");
 
     let today = chrono::offset::Local::now();
     let todays_journal_file = logseq_graph_root
