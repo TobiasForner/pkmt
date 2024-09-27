@@ -142,33 +142,23 @@ fn handle_youtube_tasks(
 
             // remove template tag and add new tags
             if let ListElement(_, props) = yt_template.get_element_mut() {
-                let (authors, video_title) = {
-                    if let Ok((video_title, authors)) =
-                        youtube_details(video_url, &config.yt_api_key)
-                    {
-                        (authors, video_title)
-                    } else {
-                        (String::new(), String::new())
-                    }
-                };
-
+                let mut add = vec![];
                 let mut tags = vec![];
-                if let Some(mut ct) = config.get_channel_tags(&authors) {
-                    tags.append(&mut ct);
+
+                if let Ok((video_title, authors)) = youtube_details(video_url, &config.yt_api_key) {
+                    add.push(("authors", vec![format!("[[{authors}]]")]));
+                    if let Some(mut ct) = config.get_channel_tags(&authors) {
+                        tags.append(&mut ct);
+                    }
+
+                    tags.append(&mut config.get_keyword_tags(&video_title));
+                    tags.sort();
+                    tags.dedup();
+                    add.push(("description", vec![video_title]));
                 }
 
-                tags.append(&mut config.get_keyword_tags(&video_title));
-                tags.sort();
-                tags.dedup();
-                *props = fill_properties(
-                    props,
-                    &[
-                        ("tags", tags),
-                        ("description", vec![video_title]),
-                        ("authors", vec![format!("[[{authors}]]")]),
-                    ],
-                    &["template"],
-                );
+                add.push(("tags", tags));
+                *props = fill_properties(props, &add, &["template"]);
 
                 // add embed
                 let embed_block = yt_template
@@ -177,9 +167,12 @@ fn handle_youtube_tasks(
                     .get_nth_child_mut(0)
                     .unwrap();
 
-                let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new_text(&format!(
-                    "{{{{video {video_url}}}}}"
-                ))]);
+                let embed = if video_url.contains("/shorts/") {
+                    DocumentComponent::new_text(video_url)
+                } else {
+                    DocumentComponent::new_text(&format!("{{{{video {video_url}}}}}"))
+                };
+                let pd = ParsedDocument::ParsedText(vec![embed]);
                 let elem = ListElement(pd, vec![]);
                 embed_block.element = elem;
             }

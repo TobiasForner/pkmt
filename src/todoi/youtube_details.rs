@@ -3,8 +3,16 @@ use std::str::FromStr;
 
 pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
     let client = reqwest::Client::new();
-    let video_url = reqwest::Url::from_str(video_url)?;
-    if let Some((_, id)) = video_url.query_pairs().find(|(k, _)| k == "v") {
+    let id = if let Some(pos) = video_url.find("/shorts/") {
+        Some(video_url[pos + 8..video_url.len()].to_string())
+    } else {
+        reqwest::Url::from_str(video_url)?
+            .query_pairs()
+            .find(|(k, _)| k == "v")
+            .map(|(_, id)| id.to_string())
+    };
+    println!("{video_url}-> {id:?}");
+    if let Some(id) = id {
         let res = client
             .get("https://www.googleapis.com/youtube/v3/videos")
             .query(&[("key", api_key), ("part", "snippet"), ("id", &id)])
