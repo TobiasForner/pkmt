@@ -13,44 +13,6 @@ use crate::{
     util::{self, indent_level, trim_like_first_line_plus},
 };
 
-#[derive(Logos, Debug, PartialEq)]
-enum LogSeqToken {
-    // Can be the start of a heading or part of a reference (e.g. [[file.md#Heading]])
-    #[token("#")]
-    SingleHash,
-    #[token("```")]
-    TripleBackQuote,
-
-    #[token("![[")]
-    EmbedStart,
-
-    #[token("[[")]
-    OpenDoubleBraces,
-    #[token("]]")]
-    ClosingDoubleBraces,
-    #[regex("[ \t]+")]
-    Space,
-    #[regex("\n\r?")]
-    Newline,
-    #[regex("\r")]
-    CarriageReturn,
-    #[token("|")]
-    Pipe,
-    #[token("[")]
-    Bracket,
-    #[token("]")]
-    ClosingBracket,
-    // Or regular expressions.
-    #[regex("[a-zA-Z_]+")]
-    Name,
-    #[token("-")]
-    Minus,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"]+")]
-    MiscText,
-    #[token("\\")]
-    Backslash,
-}
-
 fn block_ranges(text: &str) -> Vec<(usize, usize)> {
     // we use that block start only in a new line and with e sequence of whitespace followed by a dash
     let block_start = regex::Regex::new(r"(^|\r?\n\r?)(\s*-)(?:\s|$|\n)").unwrap();
@@ -154,7 +116,7 @@ enum LogSeqBlockToken {
     Minus,
     #[regex("[a-zA-Z][a-zA-Z_]*::")]
     PropertyStart,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"\\|]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"\\|\u{c4}\u{e4}\u{d6}\u{f6}\u{dc}\u{fc}\u{df}]+")]
     MiscText,
     #[token("\\")]
     Backslash,
@@ -471,5 +433,13 @@ fn test_code_block() {
     let res = parse_logseq_text(text, &None).unwrap();
     let res = res.to_logseq_text(&None);
     let expected = "- ```python\n  res=set()\n  ```";
+    assert_eq!(res, expected);
+}
+#[test]
+fn test_umlaut() {
+    let text = "üÜäÄöÖß";
+    let res = parse_logseq_text(text, &None);
+    let res = res.unwrap().to_logseq_text(&None);
+    let expected = "- üÜäÄöÖß";
     assert_eq!(res, expected);
 }
