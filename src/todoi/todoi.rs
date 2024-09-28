@@ -8,16 +8,18 @@ use crate::{
     logseq_parsing::parse_logseq_file,
     todoi::{
         config::Config,
+        interactive::{handle_interactive, Resolution},
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
     },
 };
 
-struct LogSeqTemplates {
+#[derive(Debug)]
+pub struct LogSeqTemplates {
     templates_pd: ParsedDocument,
 }
 impl LogSeqTemplates {
-    fn new(logseq_graph_root: &PathBuf) -> Result<Self> {
+    pub fn new(logseq_graph_root: &PathBuf) -> Result<Self> {
         let templates_file = logseq_graph_root
             .join("pages")
             .join("Templates.md")
@@ -28,7 +30,7 @@ impl LogSeqTemplates {
         Ok(Self { templates_pd: pd })
     }
 
-    fn get_template_comp(&self, template_name: &str) -> Option<DocumentComponent> {
+    pub fn get_template_comp(&self, template_name: &str) -> Option<DocumentComponent> {
         use crate::document_component::DocumentElement::ListElement;
         self.templates_pd
             .get_document_component(&|c| match &c.element {
@@ -37,6 +39,26 @@ impl LogSeqTemplates {
                     .any(|(key, value)| key == "template" && value == template_name),
                 _ => false,
             })
+    }
+    pub fn template_names(&self) -> Vec<String> {
+        use crate::document_component::DocumentElement::ListElement;
+        let mut res = vec![];
+        let template_comps = self.templates_pd.get_all_document_components(&|c| {
+            if let ListElement(_, props) = &c.element {
+                props.iter().any(|(key, _)| key == "template")
+            } else {
+                false
+            }
+        });
+        template_comps.iter().for_each(|c| {
+            if let ListElement(_, props) = &c.element {
+                if let Some((_, value)) = props.iter().find(|(key, _)| key == "template") {
+                    res.push(value.clone());
+                }
+            }
+        });
+
+        res
     }
 }
 
@@ -105,9 +127,24 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
         .filter(|task| !new_completions.contains(task))
         .collect();
 
-    println!("remaining: {remaining_tasks:?}");
-
+    let mut cancelled = false;
+    remaining_tasks.iter().for_each(|t| {
+        if !cancelled {
+            let res = handle_interactive(t, &mut todays_journal, &templates, &config);
+            println!("{t:?}: {res:?}");
+            match res {
+                Resolution::Cancel => {
+                    cancelled = true;
+                }
+                Resolution::Skip => {}
+                Resolution::Complete => {
+                    completed_tasks.push(t.clone());
+                }
+            }
+        }
+    });
     std::fs::write(todays_journal_file, todays_journal.to_logseq_text(&None))?;
+
     if complete_tasks {
         completed_tasks.iter().for_each(|t| {
             println!("Completing: {}", t.content);
@@ -225,7 +262,7 @@ fn handle_youtube_playlists(
         .collect()
 }
 
-fn fill_properties(
+pub fn fill_properties(
     props: &[(String, String)],
     add: &[(&str, Vec<String>)],
     drop: &[&str],
