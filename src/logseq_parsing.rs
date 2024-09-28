@@ -116,7 +116,7 @@ enum LogSeqBlockToken {
     Minus,
     #[regex("[a-zA-Z][a-zA-Z_]*::")]
     PropertyStart,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"\\|\u{c4}\u{e4}\u{d6}\u{f6}\u{dc}\u{fc}\u{df}]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"\\|\u{c4}\u{e4}\u{d6}\u{f6}\u{dc}\u{fc}\u{df}\u{b7}]+")]
     MiscText,
     #[token("\\")]
     Backslash,
