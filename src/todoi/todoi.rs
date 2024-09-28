@@ -78,7 +78,7 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
         .join(today.format("%Y_%m_%d.md").to_string());
     let todays_journal = if todays_journal_file.exists() {
         println!("loaded existing journal file");
-        parse_logseq_file(&todays_journal_file).unwrap()
+        parse_logseq_file(&todays_journal_file)?
     } else {
         println!("creating new journal file!");
         ParsedDocument::ParsedFile(vec![], todays_journal_file.clone())
