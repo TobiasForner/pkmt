@@ -97,6 +97,18 @@ impl ParsedDocument {
 
         None
     }
+    pub fn get_all_document_components(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<DocumentComponent> {
+        let mut res = vec![];
+        for comp in self.components() {
+            let mut rec = comp.get_all_document_components(selector);
+            res.append(&mut rec);
+        }
+
+        res
+    }
 
     pub fn with_components(&self, components: Vec<DocumentComponent>) -> ParsedDocument {
         match self {
@@ -412,6 +424,17 @@ impl DocumentElement {
             _ => None,
         }
     }
+    pub fn get_all_document_components(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<DocumentComponent> {
+        use DocumentElement::*;
+        match self {
+            Admonition(comps, _) => comps.iter().filter(|c| selector(c)).cloned().collect(),
+            ListElement(pd, _) => pd.get_all_document_components(selector),
+            _ => vec![],
+        }
+    }
 
     pub fn get_document_component_mut(
         &mut self,
@@ -560,6 +583,22 @@ impl DocumentComponent {
         }
 
         None
+    }
+    pub fn get_all_document_components(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<DocumentComponent> {
+        if selector(self) {
+            return vec![self.clone()];
+        }
+        let mut res = vec![];
+        res.append(&mut self.element.get_all_document_components(&selector));
+
+        self.children.iter().for_each(|c| {
+            let mut rec = c.get_all_document_components(&selector);
+            res.append(&mut rec);
+        });
+        res
     }
 
     pub fn get_element_mut(&mut self) -> &mut DocumentElement {
