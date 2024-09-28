@@ -57,7 +57,7 @@ pub fn handle_interactive(
         let mut add = vec![];
         let content = util::apply_substitutions(&task.content);
         let url_re =
-            Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|·$]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_]+)\)");
+            Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|·$§]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_]+)\)");
         if let Some(captures) = url_re.unwrap().captures(&content) {
             if let Some(title) = captures.get(1) {
                 let title = title.as_str().to_string();
