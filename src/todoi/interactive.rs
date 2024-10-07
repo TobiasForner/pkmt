@@ -1,9 +1,9 @@
 use anyhow::{bail, Result};
 use regex::Regex;
 
-use crate::{document_component::ParsedDocument, todoi::todoi::fill_properties, util};
+use crate::{document_component::ParsedDocument, todoi::fill_properties, util};
 
-use super::{config::Config, todoi::LogSeqTemplates, todoist_api::TodoistTask};
+use super::{config::Config, todoist_api::TodoistTask, LogSeqTemplates};
 #[derive(Debug)]
 pub enum Resolution {
     Skip,

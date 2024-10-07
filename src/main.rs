@@ -99,7 +99,7 @@ fn run() -> Result<()> {
             graph_root,
             complete_tasks,
         }) => {
-            todoi::todoi::main(graph_root, complete_tasks)?;
+            todoi::main(graph_root, complete_tasks)?;
             Ok(())
         }
         Some(Commands::Checklist {
