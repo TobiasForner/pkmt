@@ -120,7 +120,7 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
     completed_tasks.append(&mut new_completions);
     let remaining_tasks: Vec<TodoistTask> = remaining_tasks
         .into_iter()
-        .filter(|task| !new_completions.contains(task))
+        .filter(|task| !completed_tasks.contains(task))
         .collect();
 
     let mut new_completions =
@@ -297,7 +297,7 @@ fn handle_sbs_tasks(
 ) -> Vec<TodoistTask> {
     use crate::document_component::DocumentElement::ListElement;
     let sbs_link_re =
-        Regex::new(r"https://ckarchive.com/b/[a-zA-Z0-9]*\?ck_subscriber_id=2334581400").unwrap();
+        Regex::new(r"https://ckarchive\.com/b/[a-zA-Z0-9]*\?ck_subscriber_id=2334581400").unwrap();
     let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
 
     if let Some(comp) = templates.get_template_comp("article") {
