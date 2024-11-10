@@ -2,7 +2,10 @@ mod config;
 mod interactive;
 mod todoist_api;
 mod youtube_details;
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use anyhow::Result;
 use interactive::handle_interactive_data;
@@ -24,7 +27,7 @@ pub struct LogSeqTemplates {
     templates_pd: ParsedDocument,
 }
 impl LogSeqTemplates {
-    pub fn new(logseq_graph_root: &PathBuf) -> Result<Self> {
+    pub fn new(logseq_graph_root: &Path) -> Result<Self> {
         let templates_file = logseq_graph_root
             .join("pages")
             .join("Templates.md")
