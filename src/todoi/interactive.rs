@@ -3,7 +3,7 @@ use regex::Regex;
 
 use crate::{document_component::ParsedDocument, todoi::fill_properties, util};
 
-use super::{config::Config, todoist_api::TodoistTask, LogSeqTemplates};
+use super::{config::Config, todoist_api::TodoistTask, LogSeqTemplates, TaskData};
 #[derive(Debug)]
 pub enum Resolution {
     Skip,
@@ -84,6 +84,85 @@ pub fn handle_interactive(
     journal_file.add_component(comp);
     Complete
 }
+
+pub fn handle_interactive_data(
+    task: &TodoistTask,
+    templates: &LogSeqTemplates,
+    config: &Config,
+) -> (Resolution, TaskData) {
+    use crate::document_component::DocumentElement::ListElement;
+    use Resolution::*;
+
+    let template_names = templates.template_names();
+    println!("{}", task.content);
+    println!("Please choose the template to use:");
+    template_names
+        .iter()
+        .enumerate()
+        .for_each(|(i, n)| println!("{i}: '{n}'"));
+
+    // wait for user to choose
+    let choice = loop {
+        let answer =
+            get_user_input("Please enter your choice (c to cancel for all, s to skip this task)");
+        let Ok(answer) = answer else {
+            panic!("error!");
+        };
+
+        println!("answer: {answer:?}");
+        match answer.as_str() {
+            "c" => return (Cancel, TaskData::Unhandled),
+            "s" => return (Skip, TaskData::Unhandled),
+            n => {
+                if let Ok(num) = n.parse::<usize>() {
+                    break num;
+                }
+            }
+        }
+    };
+    let template_name = &template_names[choice];
+
+    let mut comp = templates.get_template_comp(template_name).unwrap();
+
+    println!("Chose {choice}: {}", template_name);
+    if let ListElement(_, props) = comp.get_element_mut() {
+        let content = util::apply_substitutions(&task.content);
+        let url_re =
+            Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)");
+        if let Some(captures) = url_re.unwrap().captures(&content) {
+            let mut tags = vec![];
+            let title = if let Some(title) = captures.get(1) {
+                let title = title.as_str().to_string();
+                tags = config.get_keyword_tags(&title);
+                Some(title)
+            } else {
+                println!("No title capture: {content}");
+                None
+            };
+            let url = if props.iter().any(|(k, _)| k == "url") {
+                if let Some(url) = captures.get(2) {
+                    Some(url.as_str().to_string())
+                } else {
+                    println!("No url capture: {content}");
+                    None
+                }
+            } else {
+                None
+            };
+            return (
+                Complete,
+                TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
+            );
+        } else {
+            println!("No match: {:?}", content);
+            return (Skip, TaskData::Unhandled);
+        }
+    }
+    {
+        (Skip, TaskData::Unhandled)
+    }
+}
+
 fn get_user_input(prompt: &str) -> Result<String> {
     println!("{prompt}: ");
     let mut answer = Default::default();
