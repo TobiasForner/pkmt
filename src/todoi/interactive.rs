@@ -76,6 +76,7 @@ pub fn handle_interactive(
             }
         } else {
             println!("No match: {:?}", content);
+            return Skip;
         }
         let new_props = fill_properties(props, &add, &["template"]);
         *props = new_props;
