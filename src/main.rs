@@ -16,6 +16,7 @@ mod obsidian_parsing;
 mod parse;
 mod todoi;
 mod util;
+mod zk_parsing;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

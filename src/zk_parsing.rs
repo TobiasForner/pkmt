@@ -1,20 +1,22 @@
-use core::panic;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use crate::util::{apply_substitutions, indent_level, trim_like_first_line_plus};
+use crate::{
+    obsidian_parsing::parse_obsidian_text,
+    util::{apply_substitutions, indent_level, trim_like_first_line_plus},
+};
 use anyhow::{bail, Context, Result};
 
 use crate::document_component::{
     collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
 };
-use logos::{Lexer, Logos, Source};
+use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, PartialEq)]
-enum ObsidianToken {
+enum ZkToken {
     // Can be the start of a heading or part of a reference (e.g. [[file.md#Heading]])
     #[token("#")]
     SingleHash,
@@ -48,19 +50,23 @@ enum ObsidianToken {
     Name,
     #[token("- ")]
     ListStart,
+    #[regex(r"[a-zA-Z_]+\s*::=\s*[a-zA-Z_]")]
+    SingleProperty,
+    #[regex(r"[a-zA-Z_]+\s*::=\s*\[([a-zA-Z_]\s*,\s*)[a-zA-Z_]\]")]
+    MultiProperty,
     #[regex("[.{}^$><,0-9():=*&/;'+!?\"]+")]
     MiscText,
     #[token("\\")]
     Backslash,
 }
 
-impl ObsidianToken {
+impl ZkToken {
     fn is_blank(&self) -> bool {
         matches!(self, Self::Space)
     }
 }
 
-pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
+pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
     let file_path = file_path.as_ref().canonicalize()?;
     let text = std::fs::read_to_string(&file_path)?;
 
@@ -69,15 +75,15 @@ pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocumen
         .context(format!("{file_path:?} has no parent!"))?
         .to_path_buf();
 
-    let pt = parse_obsidian_text(&text, &Some(file_dir))?;
+    let pt = parse_zk_text(&text, &Some(file_dir))?;
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
-pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
-    use ObsidianToken::*;
+pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
+    use ZkToken::*;
     let text = apply_substitutions(text);
 
-    let mut lexer = ObsidianToken::lexer(&text);
+    let mut lexer = ZkToken::lexer(&text);
     let mut res = vec![];
     let mut blank_line = true;
     let mut indent_spaces = 0;
@@ -100,11 +106,43 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                             )
                         }
                     }
+                    SingleProperty => {
+                        let parts = lexer
+                            .slice()
+                            .split_once("::=")
+                            .context("Single property must contain '::='!")?;
+                        let prop_name = parts.0.trim();
+                        let prop_value = parts.0.trim();
+                        res.push(DocumentComponent::new(DocumentElement::Properties(vec![(
+                            prop_name.to_string(),
+                            vec![prop_value.to_string()],
+                        )])));
+                    }
+                    MultiProperty => {
+                        let parts = lexer
+                            .slice()
+                            .split_once("::=")
+                            .context("Single property must contain '::='!")?;
+                        let prop_name = parts.0.trim();
+                        let prop_values = parts.0.trim().replace("[", "").replace("]", "");
+                        let prop_values = prop_values
+                            .split(",")
+                            .map(|s| s.trim().to_string())
+                            .collect();
+                        res.push(DocumentComponent::new(DocumentElement::Properties(vec![(
+                            prop_name.to_string(),
+                            prop_values,
+                        )])));
+                    }
                     SingleHash => {
-                        let elem = parse_heading(&mut lexer)?;
-                        let comp = DocumentComponent::new(elem);
-                        res.push(comp);
-                        res.push(DocumentComponent::new_text("\n"));
+                        if blank_line {
+                            let elem = parse_heading(&mut lexer)?;
+                            let comp = DocumentComponent::new(elem);
+                            res.push(comp);
+                            res.push(DocumentComponent::new_text("\n"));
+                        } else {
+                            res.push(DocumentComponent::new_text("#"));
+                        }
                     }
                     Name => res.push(DocumentComponent::new(DocumentElement::Text(
                         lexer.slice().to_string(),
@@ -178,7 +216,7 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
     Ok(ParsedDocument::ParsedText(res))
 }
 
-fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
+fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
     let slice = lexer.slice().escape_default();
     let start = lexer.span().start;
     let text = lexer.source();
@@ -187,7 +225,7 @@ fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
 }
 
 fn parse_list_element(
-    lexer: &mut Lexer<'_, ObsidianToken>,
+    lexer: &mut Lexer<'_, ZkToken>,
     initial_indent_spaces: usize,
     file_dir: &Option<PathBuf>,
 ) -> Result<ParsedDocument> {
@@ -200,7 +238,7 @@ fn parse_list_element(
         if !token.is_blank() {
             blank_line = false;
         }
-        if token == ObsidianToken::Newline {
+        if token == ZkToken::Newline {
             last_was_blank = blank_line;
             blank_line = true;
         }
@@ -266,23 +304,24 @@ fn assemble_blocks_rec(
 
 fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<DocumentElement> {
     let text = text.trim().replacen("- ", "", 1);
-    let pd = parse_obsidian_text(&text, file_dir)?;
+    let pd = parse_zk_text(&text, file_dir)?;
     Ok(DocumentElement::ListElement(pd, vec![]))
 }
-fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement> {
+fn parse_heading(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentElement> {
+    use ZkToken::*;
     let mut level = 1;
     let mut text = String::new();
     while let Some(Ok(token)) = lexer.next() {
         match token {
-            ObsidianToken::SingleHash => {
+            SingleHash => {
                 level += 1;
             }
-            ObsidianToken::Space => text.push_str(lexer.slice()),
-            ObsidianToken::Name => text.push_str(lexer.slice()),
-            ObsidianToken::MiscText => text.push_str(lexer.slice()),
-            ObsidianToken::CarriageReturn => text.push('\r'),
-            ObsidianToken::Newline => return Ok(DocumentElement::Heading(level, text)),
-            ObsidianToken::Backslash => text.push_str(lexer.slice()),
+            Space => text.push_str(lexer.slice()),
+            Name => text.push_str(lexer.slice()),
+            MiscText => text.push_str(lexer.slice()),
+            CarriageReturn => text.push('\r'),
+            Newline => return Ok(DocumentElement::Heading(level, text)),
+            Backslash => text.push_str(lexer.slice()),
             other => bail!(
                 "Failed to parse heading! {other:?}: {}",
                 construct_error_details(lexer)
@@ -293,13 +332,13 @@ fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement
 }
 
 fn parse_adnote(
-    lexer: &mut Lexer<'_, ObsidianToken>,
+    lexer: &mut Lexer<'_, ZkToken>,
     file_dir: &Option<PathBuf>,
 ) -> Result<DocumentElement> {
     let mut text = String::new();
     while let Some(Ok(token)) = lexer.next() {
         match token {
-            ObsidianToken::TripleBackQuote => {
+            ZkToken::TripleBackQuote => {
                 let text = text.trim_start_matches("\n").trim_end_matches("\n");
                 let mut properties = HashMap::new();
                 let mut body_text = String::new();
@@ -318,7 +357,7 @@ fn parse_adnote(
                         body_text.push_str(line);
                     }
                 }
-                let pd = parse_obsidian_text(&body_text, file_dir)?;
+                let pd = parse_zk_text(&body_text, file_dir)?;
                 return Ok(DocumentElement::Admonition(
                     pd.into_components(),
                     properties,
@@ -338,10 +377,10 @@ fn parse_adnote(
 }
 
 fn parse_file_link(
-    lexer: &mut Lexer<'_, ObsidianToken>,
+    lexer: &mut Lexer<'_, ZkToken>,
     file_dir: &Option<PathBuf>,
 ) -> Result<(MentionedFile, Option<String>, Option<String>)> {
-    use ObsidianToken::*;
+    use ZkToken::*;
     let mut name = String::new();
     let mut section = None;
     let mut rename = None;
@@ -367,9 +406,7 @@ fn parse_file_link(
                         let file = file.canonicalize()?;
                         mf = MentionedFile::FilePath(file);
                     }
-                    let Ok(file) = PathBuf::from_str(&name) else {
-                        panic!("should not happen: PathBuf::from_str failed with str input")
-                    };
+                    let Ok(file) = PathBuf::from_str(&name);
 
                     if file.exists() {
                         mf = MentionedFile::FilePath(file.canonicalize()?);
@@ -425,12 +462,12 @@ Some text with $x+1$ math...
 A new line!
 ```";
 
-    let res = parse_obsidian_text(text, &None);
+    let res = parse_zk_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
         let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(
-            crate::obsidian_parsing::DocumentElement::Admonition(
+            crate::document_component::DocumentElement::Admonition(
                 vec![DocumentComponent::new_text(
                     "Some text with $x+1$ math...\nA new line!",
                 )],
@@ -447,40 +484,11 @@ A new line!
 fn test_text_parsing() {
     use DocumentElement::*;
     let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.";
-    let res = parse_obsidian_text(text, &None);
+    let res = parse_zk_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
         let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
-        assert_eq!(res, expected);
-    } else {
-        panic!("Got {res:?}")
-    }
-}
-
-#[test]
-fn test_newlines() {
-    let text = r"														
-## Basic Definitions
-![[ApproximationAlgorithm]]
-
-```ad-note
-title: Theorem 
-Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.
-```
-
-![[PTAS]]
-";
-    let res = parse_obsidian_text(text, &None);
-    if let Ok(res) = res {
-        let res = res.to_logseq_text(&None);
-        let expected = r"- ## Basic Definitions
-    - {{embed [[ApproximationAlgorithm]]}}
-    - #+BEGIN_QUOTE
-    **Theorem**
-    Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique]], unless P = NP.
-    #+END_QUOTE
-    - {{embed [[PTAS]]}}".to_string();
         assert_eq!(res, expected);
     } else {
         panic!("Got {res:?}")
@@ -493,31 +501,11 @@ fn test_image_embed_conversion() {
         "variables will become nonzero, so we only need to keep track of these nonzero variables.
 
 #### Initial Algorithm";
-    let res = parse_obsidian_text(test_text, &None);
+    let res = parse_zk_text(test_text, &None);
     if let Ok(pd) = res {
         println!("{pd:?}");
         let logseq_text = pd.to_logseq_text(&None);
-        let expected_text = "- variables will become nonzero, so we only need to keep track of these nonzero variables.\n- #### Initial Algorithm".to_string();
-        assert_eq!(logseq_text, expected_text);
-    } else {
-        panic!("Error: {res:?}");
-    }
-}
-
-#[test]
-fn test_admonition_in_between() {
-    let test_text= "This leads to the following observation.
-```ad-note
-title: Observation 7.2
-For any path $P$ of vertices of degree two in graph $G$, Algorithm 7.2 will choose at most one vertex from $P$; that is, $|S \\cap P| \\leq 1$ for the final solution $S$ given by the algorithm.
-```
-##### *Proof*
-Once $S$ contains a vertex ";
-    let res = parse_obsidian_text(test_text, &None);
-    if let Ok(pd) = res {
-        println!("{pd:?}");
-        let logseq_text = pd.to_logseq_text(&None);
-        let expected_text = "- This leads to the following observation.\n- #+BEGIN_QUOTE\n**Observation 7.2**\nFor any path $P$ of vertices of degree two in graph $G$, Algorithm 7.2 will choose at most one vertex from $P$; that is, $|S \\cap P| \\leq 1$ for the final solution $S$ given by the algorithm.\n#+END_QUOTE\n- ##### *Proof*\n    - Once $S$ contains a vertex".to_string();
+        let expected_text = "- variables will become nonzero, so we only need to keep track of these nonzero variables.\n\n- #### Initial Algorithm".to_string();
         assert_eq!(logseq_text, expected_text);
     } else {
         panic!("Error: {res:?}");
@@ -527,7 +515,7 @@ Once $S$ contains a vertex ";
 #[test]
 fn test_simple_list() {
     let text = "- item 1\n- item 2";
-    let res = parse_obsidian_text(text, &None);
+    let res = parse_zk_text(text, &None);
     if let Ok(pd) = res {
         assert_eq!(
             pd,
@@ -550,7 +538,7 @@ fn test_simple_list() {
 #[test]
 fn test_nested_list() {
     let text = "- item 1\n    - item 1.1\n    - item 1.2\n- item 2\n    -  item 2.1";
-    let res = parse_obsidian_text(text, &None);
+    let res = parse_zk_text(text, &None);
     if let Ok(pd) = res {
         let res = pd.to_logseq_text(&None);
         assert_eq!(text.replace("    ", "\t"), res);

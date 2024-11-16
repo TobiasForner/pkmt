@@ -256,6 +256,8 @@ pub enum DocumentElement {
 
     /// list item, map stores additional properties
     ListElement(ParsedDocument, Vec<(String, String)>),
+
+    Properties(Vec<(String, Vec<String>)>),
 }
 
 impl DocumentElement {
@@ -267,6 +269,16 @@ impl DocumentElement {
         let mut tmp = self.clone();
         tmp.cleanup();
         match self {
+            Properties(props) => {
+                let mut res = String::new();
+                props.iter().for_each(|(key, vals)| {
+                    let value = vals.join(", ");
+                    res.push_str(key);
+                    res.push_str(":: ");
+                    res.push_str(&value);
+                });
+                res
+            }
             Heading(level, title) => {
                 let title = title.trim();
                 let hashes = "#".repeat(*level as usize).to_string();
@@ -458,6 +470,7 @@ impl DocumentElement {
             FileLink(_, _, _) => false,
             ListElement(_, _) => true,
             CodeBlock(_, _) => true,
+            Properties(_) => true,
         }
     }
 
