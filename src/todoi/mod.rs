@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
+use clap::Command;
 use interactive::handle_interactive_data;
 use regex::Regex;
 
@@ -20,6 +21,7 @@ use crate::{
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
     },
+    zk_parsing,
 };
 
 #[derive(Debug)]
@@ -69,8 +71,9 @@ impl LogSeqTemplates {
         res
     }
 }
-
-pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
+/// gathers tasks and calls the correct handler
+/// tasks are marked as completed if complete_tasks is set
+pub fn main(root_dir: PathBuf, complete_tasks: bool) -> Result<()> {
     let config = Config::parse(PathBuf::from_str(
         "/mnt/c/Users/Tobias/AppData/Local/todoist_import/todoist_import/todoi_config.toml",
     )?);
@@ -79,7 +82,22 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
 
     let inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
     println!("Retrieved todoist tasks.");
+    let completed_tasks = add_to_logseq(root_dir, &inbox_tasks, &config)?;
 
+    if complete_tasks {
+        completed_tasks.iter().for_each(|t| {
+            println!("Completing: {}", t.content);
+            todoist_api.close_task(t);
+        });
+    }
+    Ok(())
+}
+
+fn add_to_logseq(
+    logseq_graph_root: PathBuf,
+    inbox_tasks: &[TodoistTask],
+    config: &Config,
+) -> Result<Vec<TodoistTask>> {
     let today = chrono::offset::Local::now();
     let todays_journal_file = logseq_graph_root
         .join("journals")
@@ -152,16 +170,9 @@ pub fn main(logseq_graph_root: PathBuf, complete_tasks: bool) -> Result<()> {
             }
         }
     });*/
-    let completed_tasks = handle_tasks(&inbox_tasks, &templates, &mut todays_journal, &config);
+    let completed_tasks = handle_tasks(inbox_tasks, &templates, &mut todays_journal, config);
     std::fs::write(todays_journal_file, todays_journal.to_logseq_text(&None))?;
-
-    if complete_tasks {
-        completed_tasks.iter().for_each(|t| {
-            println!("Completing: {}", t.content);
-            todoist_api.close_task(t);
-        });
-    }
-    Ok(())
+    Ok(completed_tasks)
 }
 
 fn handle_tasks(
@@ -208,6 +219,21 @@ fn handle_tasks(
         .collect()
 }
 
+pub fn test_zk(root_dir: PathBuf) {
+    let title = "test_title";
+    let template_file = root_dir.join(".zk/templates/yt_video.md");
+    use std::process::Command;
+    let output = Command::new("zk")
+        .arg("new")
+        .arg("--no-input")
+        .arg(format!("--title={title}"))
+        .arg(format!("--template={}", template_file.to_str().unwrap()))
+        .arg("-p")
+        .output();
+    println!("Got {output:?}");
+}
+
+#[derive(Debug)]
 pub enum TaskData {
     Unhandled,
     /// url, title, channel, tags
@@ -221,6 +247,33 @@ pub enum TaskData {
 }
 
 impl TaskData {
+    fn add_to_zk(&self, root_dir: PathBuf) -> bool {
+        match self {
+            TaskData::Youtube(url, title, channel, tags) => {
+                let template_file = root_dir.join(".zk/templates/yt_video.md");
+                let Ok(zk_file) = TaskData::get_zk_file(title, template_file) else {
+                    return false;
+                };
+                let pd = zk_parsing::parse_zk_file(zk_file);
+                println!("{pd:?}");
+                true
+            }
+            _ => todo!("not implemented: conversion of {self:?} to zk."),
+        }
+    }
+
+    fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
+        use std::process::Command;
+        let output = Command::new("zk")
+            .arg("new")
+            .arg("--no-input")
+            .arg(format!("--title={title}"))
+            .arg(format!("--template={}", template_path.to_str().unwrap()))
+            .arg("-p")
+            .output()?;
+        let p = std::str::from_utf8(&output.stdout)?;
+        Ok(PathBuf::from_str(p)?)
+    }
     fn add_to_logseq_journal(
         &self,
         templates: &LogSeqTemplates,

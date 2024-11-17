@@ -5,6 +5,7 @@ use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
 use parse::ParseMode;
+use todoi::test_zk;
 use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
@@ -72,7 +73,7 @@ enum Commands {
     },
     Test {
         #[arg(required = true)]
-        templates_file: PathBuf,
+        root_dir: PathBuf,
     },
     Todoi {
         #[arg(required = true)]
@@ -118,10 +119,9 @@ fn run() -> Result<()> {
             similar_file_names(root_dir, 4);
             Ok(())
         }
-        Some(Commands::Test { templates_file }) => {
-            println!("{templates_file:?}");
-            let pd = logseq_parsing::parse_logseq_file(&templates_file)?;
-            println!("{pd:?}\n\n{}", pd.to_logseq_text(&None));
+        Some(Commands::Test { root_dir }) => {
+            println!("{root_dir:?}");
+            test_zk(root_dir);
             Ok(())
         }
         Some(Commands::Convert {
