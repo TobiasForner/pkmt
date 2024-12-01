@@ -63,6 +63,14 @@ pub enum ParsedDocument {
 }
 
 impl ParsedDocument {
+    pub fn to_string(&self, outmode: TextMode, file_info: &Option<FileInfo>) -> String {
+        use TextMode::*;
+        match outmode {
+            Obsidian => todo!("Conversion to Obsidian is not implemented yet!"),
+            LogSeq => self.to_logseq_text(file_info),
+            Zk => self.to_zk_text(file_info),
+        }
+    }
     pub fn components(&self) -> &Vec<DocumentComponent> {
         use ParsedDocument::*;
         match self {
@@ -848,18 +856,13 @@ pub fn convert_file(
     inmode: TextMode,
     outmode: TextMode,
 ) -> Result<Vec<String>> {
-    use TextMode::*;
     let file = &file_info.original_file;
     let pd = parse_file(file, inmode);
 
     if let Ok(pd) = pd {
         let mentioned_files = pd.mentioned_files();
 
-        let text = match outmode {
-            Obsidian => todo!("Conversion to Obsidian is not implemented yet!"),
-            LogSeq => pd.to_logseq_text(&Some(file_info.clone())),
-            Zk => pd.to_zk_text(&Some(file_info.clone())),
-        };
+        let text = pd.to_string(outmode, &Some(file_info.clone()));
         let dest_file = file_info
             .destination_file
             .clone()
