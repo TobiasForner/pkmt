@@ -7,7 +7,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use crate::{
-    parse::{parse_file, ParseMode},
+    parse::{parse_file, TextMode},
     util::{self, files_in_tree, indent_level},
 };
 
@@ -151,6 +151,20 @@ impl ParsedDocument {
             .flat_map(|c| c.mentioned_files().into_iter())
             .collect()
     }
+
+    pub fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
+        println!("{self:?}");
+        let mut res = String::new();
+        self.components().iter().for_each(|c| {
+            if !res.is_empty() && c.should_have_own_block() {
+                res.push('\n');
+            }
+            res.push_str(&c.to_zk_text(file_info));
+        });
+
+        res
+    }
+
     pub fn to_logseq_text(&self, file_info: &Option<FileInfo>) -> String {
         let mut res = String::new();
         let mut new_block = true;
@@ -425,6 +439,132 @@ impl DocumentElement {
         }
     }
 
+    fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
+        use DocumentElement::*;
+        let mut tmp = self.clone();
+        tmp.cleanup();
+        match self {
+            Properties(props) => {
+                let mut res = String::new();
+                props.iter().for_each(|(key, vals)| {
+                    let value = vals.join(", ");
+                    res.push_str(key);
+                    res.push_str(":: ");
+                    res.push_str(&value);
+                });
+                res
+            }
+            Heading(level, title) => {
+                let title = title.trim();
+                let hashes = "#".repeat(*level as usize).to_string();
+                format!("{hashes} {title}")
+            }
+            // todo use other parsed properties
+            FileLink(file, _, _) => format!("[[{file}]]"),
+            FileEmbed(file, _) => {
+                let file_name = match file {
+                    MentionedFile::FileName(name) => name,
+                    MentionedFile::FilePath(file_path) => {
+                        if let Some(name) = file_path.file_name() {
+                            &name.to_string_lossy()
+                        } else {
+                            "___nothing.txt"
+                        }
+                    }
+                };
+                if let Some(file_info) = file_info {
+                    if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
+                        if let Some((name, ext)) = file_name.rsplit_once('.') {
+                            if ["png", "jpeg"].contains(&ext) {
+                                println!("image: {file_name}: {file_info:?}");
+                                let dest_dir = dest_file.parent().unwrap();
+                                let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
+                                if let Some(rel) = rel {
+                                    return format!(
+                                        "![image.{ext}]({})",
+                                        rel.to_string_lossy().replace("\\", "/")
+                                    );
+                                } else {
+                                    println!("{image_out:?} and {dest_file:?} don't share a path!")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                format!("{{{{embed [[{file}]]}}}}")
+            }
+            Text(text) => text.to_string(),
+            Admonition(s, props) => {
+                // todo: proper implementation, how should admonitions be represented?
+                let mut res = "- #+BEGIN_QUOTE".to_string();
+                if let Some(title) = props.get("title") {
+                    res.push('\n');
+                    res.push_str("**");
+                    res.push_str(title);
+                    res.push_str("**");
+                }
+                let body = s
+                    .iter()
+                    .map(|c| c.to_logseq_text(file_info))
+                    .collect::<Vec<String>>()
+                    .join("");
+                let body = body.trim();
+                res.push('\n');
+                res.push_str(body);
+                res.push('\n');
+                res.push_str("#+END_QUOTE");
+                res
+            }
+            CodeBlock(text, code_type) => {
+                let mut res = if let Some(ct) = code_type {
+                    format!("```{ct}\n")
+                } else {
+                    String::from("```\n")
+                };
+                res.push_str(text);
+                res.push('\n');
+                res.push_str("```");
+                res
+            }
+            ListElement(pd, properties) => {
+                let text = pd.to_zk_text(file_info);
+                let mut res = String::new();
+                // todo: use proper properties format
+                if !properties.is_empty() {
+                    properties
+                        .iter()
+                        .enumerate()
+                        .for_each(|(index, (key, value))| {
+                            let line = if value.is_empty() {
+                                format!("{key}::")
+                            } else {
+                                format!("{key}:: {value}")
+                            };
+                            if index > 0 {
+                                res.push_str("\n  ");
+                            } else {
+                                res.push_str("- ");
+                            }
+                            res.push_str(&line);
+                        });
+                }
+                text.lines().enumerate().for_each(|(i, l)| {
+                    if res.is_empty() && i == 0 && !l.trim().starts_with("- ") {
+                        res.push_str("- ");
+                    } else if i > 0 {
+                        res.push_str("\n  ");
+                    }
+                    res.push_str(l);
+                });
+                if res.is_empty() {
+                    res.push('-')
+                }
+                res
+            }
+        }
+    }
+
     pub fn get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
@@ -554,6 +694,21 @@ impl DocumentComponent {
         res
     }
 
+    fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
+        let res = [self.element.to_zk_text(file_info)]
+            .into_iter()
+            .chain(self.children.iter().map(|c| {
+                let mut res = String::new();
+                c.to_zk_text(file_info).lines().for_each(|line| {
+                    let _ = res.write_str("\n\t");
+                    let _ = res.write_str(line);
+                });
+                res
+            }))
+            .collect();
+        res
+    }
+
     pub fn is_empty_lines(&self) -> bool {
         self.element.is_empty_lines()
     }
@@ -656,7 +811,8 @@ impl DocumentComponent {
 pub fn convert_tree(
     root_dir: PathBuf,
     target_dir: PathBuf,
-    inmode: ParseMode,
+    inmode: TextMode,
+    outmode: TextMode,
     image_dir: &Option<PathBuf>,
     image_out_dir: &Option<PathBuf>,
 ) -> Result<Vec<String>> {
@@ -678,7 +834,7 @@ pub fn convert_tree(
                 image_dir.clone(),
                 image_out_dir.clone(),
             )?;
-            convert_file(file_info, inmode.clone())
+            convert_file(file_info, inmode.clone(), outmode.clone())
         })
         .collect::<Result<Vec<Vec<String>>>>();
     match mentioned_files {
@@ -687,13 +843,23 @@ pub fn convert_tree(
     }
 }
 
-pub fn convert_file(file_info: FileInfo, inmode: ParseMode) -> Result<Vec<String>> {
+pub fn convert_file(
+    file_info: FileInfo,
+    inmode: TextMode,
+    outmode: TextMode,
+) -> Result<Vec<String>> {
+    use TextMode::*;
     let file = &file_info.original_file;
     let pd = parse_file(file, inmode);
 
     if let Ok(pd) = pd {
         let mentioned_files = pd.mentioned_files();
-        let text = pd.to_logseq_text(&Some(file_info.clone()));
+
+        let text = match outmode {
+            Obsidian => todo!("Conversion to Obsidian is not implemented yet!"),
+            LogSeq => pd.to_logseq_text(&Some(file_info.clone())),
+            Zk => pd.to_zk_text(&Some(file_info.clone())),
+        };
         let dest_file = file_info
             .destination_file
             .clone()

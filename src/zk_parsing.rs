@@ -504,9 +504,8 @@ fn test_image_embed_conversion() {
     let res = parse_zk_text(test_text, &None);
     if let Ok(pd) = res {
         println!("{pd:?}");
-        let logseq_text = pd.to_logseq_text(&None);
-        let expected_text = "- variables will become nonzero, so we only need to keep track of these nonzero variables.\n\n- #### Initial Algorithm".to_string();
-        assert_eq!(logseq_text, expected_text);
+        let zk_text = pd.to_zk_text(&None);
+        assert_eq!(zk_text, test_text);
     } else {
         panic!("Error: {res:?}");
     }
@@ -540,7 +539,7 @@ fn test_nested_list() {
     let text = "- item 1\n    - item 1.1\n    - item 1.2\n- item 2\n    -  item 2.1";
     let res = parse_zk_text(text, &None);
     if let Ok(pd) = res {
-        let res = pd.to_logseq_text(&None);
+        let res = pd.to_zk_text(&None);
         assert_eq!(text.replace("    ", "\t"), res);
     } else {
         panic!("Error: {res:?}");

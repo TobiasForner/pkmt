@@ -8,20 +8,20 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub enum ParseMode {
+pub enum TextMode {
     Obsidian,
     LogSeq,
     Zk,
 }
 
-impl ValueEnum for ParseMode {
+impl ValueEnum for TextMode {
     fn value_variants<'a>() -> &'a [Self] {
-        use ParseMode::*;
+        use TextMode::*;
         &[Obsidian, LogSeq, Zk]
     }
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
-        use ParseMode::*;
+        use TextMode::*;
         Some(match self {
             Obsidian => PossibleValue::new("obsidian"),
             LogSeq => PossibleValue::new("logseq"),
@@ -30,10 +30,11 @@ impl ValueEnum for ParseMode {
     }
 }
 
-pub fn parse_file(file: &PathBuf, mode: ParseMode) -> Result<ParsedDocument> {
+pub fn parse_file(file: &PathBuf, mode: TextMode) -> Result<ParsedDocument> {
+    use TextMode::*;
     match mode {
-        ParseMode::Obsidian => parse_obsidian_file(file),
-        ParseMode::LogSeq => parse_logseq_file(file),
-        ParseMode::Zk => parse_zk_file(file),
+        Obsidian => parse_obsidian_file(file),
+        LogSeq => parse_logseq_file(file),
+        Zk => parse_zk_file(file),
     }
 }

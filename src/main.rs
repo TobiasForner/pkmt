@@ -4,7 +4,7 @@ mod file_checklist;
 use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
-use parse::ParseMode;
+use parse::TextMode;
 use todoi::test_zk;
 use util::files_in_tree;
 
@@ -40,11 +40,11 @@ enum Commands {
 
         /// parsing mode
         #[arg(value_enum)]
-        inmode: ParseMode,
+        inmode: TextMode,
 
         /// parsing mode
         #[arg(value_enum)]
-        outmode: ParseMode,
+        outmode: TextMode,
 
         /// image directory for the input files. If this is set, found image files will be copied to the output image dir `imout` (required in this case)
         #[arg(long)]
@@ -128,7 +128,7 @@ fn run() -> Result<()> {
             in_path,
             out_path,
             inmode,
-            outmode: _,
+            outmode,
             imdir,
             imout,
         }) => {
@@ -142,11 +142,11 @@ fn run() -> Result<()> {
                 imout = Some(im_out.canonicalize()?);
             }
             let mentioned_files = if in_path.is_dir() {
-                convert_tree(in_path, out_path, inmode, &imdir, &imout)
+                convert_tree(in_path, out_path, inmode, outmode, &imdir, &imout)
             } else {
                 let file_info =
                     FileInfo::try_new(in_path, Some(out_path), imdir.clone(), imout.clone())?;
-                convert_file(file_info, inmode)
+                convert_file(file_info, inmode, outmode)
             }?;
 
             let mentioned_files: HashSet<String> = HashSet::from_iter(mentioned_files);
