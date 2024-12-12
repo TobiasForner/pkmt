@@ -1,14 +1,17 @@
+use core::panic;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     str::FromStr,
 };
+use test_log::test;
 
 use crate::{
-    obsidian_parsing::parse_obsidian_text,
+    document_component::Property,
     util::{apply_substitutions, indent_level, trim_like_first_line_plus},
 };
 use anyhow::{bail, Context, Result};
+use tracing::{debug, info, instrument};
 
 use crate::document_component::{
     collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
@@ -46,15 +49,17 @@ enum ZkToken {
     #[token("]")]
     ClosingBracket,
     // Or regular expressions.
-    #[regex("[-a-zA-Z_]+")]
+    #[regex("[-a-zäöüA-ZÄÖÜ_]+")]
     Name,
     #[token("- ")]
     ListStart,
-    #[regex(r"[a-zA-Z_]+\s*::=\s*[a-zA-Z_]")]
+    #[token("---")]
+    FrontmatterDelim,
+    #[regex(r"[a-zA-Z_]+\s*::=[ \t]*[a-zA-Z_]*")]
     SingleProperty,
-    #[regex(r"[a-zA-Z_]+\s*::=\s*\[([a-zA-Z_]\s*,\s*)[a-zA-Z_]\]")]
+    #[regex(r"[a-zA-Z_]+\s*::=[ \t]\[(([a-zA-Z_]\s*,\s*)*[a-zA-Z_])?\]")]
     MultiProperty,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"%]+")]
     MiscText,
     #[token("\\")]
     Backslash,
@@ -62,7 +67,7 @@ enum ZkToken {
 
 impl ZkToken {
     fn is_blank(&self) -> bool {
-        matches!(self, Self::Space)
+        matches!(self, Self::Space) || matches!(self, Self::Newline)
     }
 }
 
@@ -79,17 +84,24 @@ pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
+#[instrument(skip_all)]
 pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use ZkToken::*;
     let text = apply_substitutions(text);
+    println!("parsing start");
+    info!("info test");
+    debug!("text after subsitutions: {text:?}");
 
     let mut lexer = ZkToken::lexer(&text);
     let mut res = vec![];
     let mut blank_line = true;
-    let mut indent_spaces = 0;
+    let indent_spaces = 0;
 
     while let Some(result) = lexer.next() {
-        println!("{result:?}: '{}'", lexer.slice());
+        debug!(
+            "token {result:?} for '{:?}'; blank={blank_line}",
+            lexer.slice()
+        );
         match result {
             Ok(token) => {
                 match token {
@@ -105,50 +117,41 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                                 "Something went wrong when trying to parse file embed: {parsed:?}"
                             )
                         }
+                        blank_line = false;
                     }
                     SingleProperty => {
-                        let parts = lexer
-                            .slice()
-                            .split_once("::=")
-                            .context("Single property must contain '::='!")?;
-                        let prop_name = parts.0.trim();
-                        let prop_value = parts.0.trim();
-                        res.push(DocumentComponent::new(DocumentElement::Properties(vec![(
-                            prop_name.to_string(),
-                            vec![prop_value.to_string()],
-                        )])));
+                        let sp = parse_single_property(&lexer)?;
+                        let sp = DocumentElement::Properties(vec![sp]);
+                        res.push(DocumentComponent::new(sp));
+                        blank_line = false;
                     }
                     MultiProperty => {
-                        let parts = lexer
-                            .slice()
-                            .split_once("::=")
-                            .context("Single property must contain '::='!")?;
-                        let prop_name = parts.0.trim();
-                        let prop_values = parts.0.trim().replace("[", "").replace("]", "");
-                        let prop_values = prop_values
-                            .split(",")
-                            .map(|s| s.trim().to_string())
-                            .collect();
-                        res.push(DocumentComponent::new(DocumentElement::Properties(vec![(
-                            prop_name.to_string(),
-                            prop_values,
-                        )])));
+                        let mp = parse_multi_property(&lexer)?;
+                        let mp = DocumentElement::Properties(vec![mp]);
+                        res.push(DocumentComponent::new(mp));
+                        blank_line = false;
                     }
                     SingleHash => {
                         if blank_line {
+                            debug!("found heading: {lexer:?}");
                             let elem = parse_heading(&mut lexer)?;
                             let comp = DocumentComponent::new(elem);
                             res.push(comp);
-                            res.push(DocumentComponent::new_text("\n"));
+                            blank_line = true;
                         } else {
                             res.push(DocumentComponent::new_text("#"));
+                            blank_line = false;
                         }
                     }
-                    Name => res.push(DocumentComponent::new(DocumentElement::Text(
-                        lexer.slice().to_string(),
-                    ))),
+                    Name => {
+                        res.push(DocumentComponent::new(DocumentElement::Text(
+                            lexer.slice().to_string(),
+                        )));
+                        blank_line = false;
+                    }
                     AdNoteStart => {
                         res.push(DocumentComponent::new(parse_adnote(&mut lexer, file_dir)?));
+                        blank_line = false;
                     }
                     Space => {
                         res.push(DocumentComponent::new(DocumentElement::Text(
@@ -163,15 +166,19 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                     }
                     Pipe => {
                         res.push(DocumentComponent::new_text("|"));
+                        blank_line = false;
                     }
                     Bracket => {
                         res.push(DocumentComponent::new_text("["));
+                        blank_line = false;
                     }
                     ClosingBracket => {
                         res.push(DocumentComponent::new_text("]"));
+                        blank_line = false;
                     }
                     Backslash => {
                         res.push(DocumentComponent::new_text("\\"));
+                        blank_line = false;
                     }
                     OpenDoubleBraces => {
                         let parsed = parse_file_link(&mut lexer, file_dir);
@@ -182,8 +189,12 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         } else {
                             bail!("Something went wrong when trying to parse file link: {parsed:?}")
                         }
+                        blank_line = false;
                     }
-                    MiscText => res.push(DocumentComponent::new_text(lexer.slice())),
+                    MiscText => {
+                        res.push(DocumentComponent::new_text(lexer.slice()));
+                        blank_line = false;
+                    }
                     CarriageReturn => {
                         res.push(DocumentComponent::new_text("\r"));
                     }
@@ -193,18 +204,19 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             {
                                 let mut comps = le.into_components();
                                 res.append(&mut comps);
+                            } else {
+                                panic!("Could not parse list element!");
                             }
+                            blank_line = true;
                         } else {
                             res.push(DocumentComponent::new_text("- "));
                         }
                     }
+                    FrontmatterDelim => {
+                        let fm = parse_frontmatter(&mut lexer)?;
+                        res.push(fm);
+                    }
                     _ => todo!("Support missing token types: {token:?}"),
-                }
-
-                if !token.is_blank() {
-                    blank_line = false;
-                } else if blank_line {
-                    indent_spaces += lexer.slice().replace("\t", "    ").len();
                 }
             }
             Err(_) => {
@@ -214,6 +226,83 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     }
     let res = collapse_text(&res);
     Ok(ParsedDocument::ParsedText(res))
+}
+fn parse_single_property(lexer: &Lexer<'_, ZkToken>) -> Result<Property> {
+    let parts = lexer
+        .slice()
+        .split_once("::=")
+        .context("Single property must contain '::='!")?;
+    let prop_name = parts.0.trim();
+    let prop_value = parse_prop_values(parts.1).0;
+    Ok(Property::new(prop_name.to_string(), true, prop_value))
+}
+
+fn parse_multi_property(lexer: &Lexer<'_, ZkToken>) -> Result<Property> {
+    let parts = lexer
+        .slice()
+        .split_once("::=")
+        .context("Single property must contain '::='!")?;
+    let prop_name = parts.0.trim();
+    let prop_values = parse_prop_values(parts.1).0;
+    Ok(Property::new(prop_name.to_string(), false, prop_values))
+}
+
+// returns vec<values>, is_multi_property (in brackets)
+fn parse_prop_values(text: &str) -> (Vec<String>, bool) {
+    let text = text.trim();
+    let multi = text.starts_with('[') && text.ends_with(']');
+    let prop_values = text.trim().replace("[", "").replace("]", "");
+    (
+        if prop_values.is_empty() {
+            vec![]
+        } else {
+            prop_values
+                .split(",")
+                .map(|s| s.trim().to_string())
+                .collect()
+        },
+        multi,
+    )
+}
+
+#[instrument]
+fn parse_frontmatter(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentComponent> {
+    use ZkToken::*;
+    let mut text = String::new();
+    while let Some(result) = lexer.next() {
+        debug!("got {result:?} for {:?}", lexer.slice());
+        let token = match result {
+            Err(_) => bail!(
+                "Failed to parse frontmatter! {result:?}; {}",
+                construct_error_details(lexer)
+            ),
+            Ok(token) => token,
+        };
+        match token {
+            FrontmatterDelim => {
+                let mut props = vec![];
+                text.lines().try_for_each(|l| {
+                    let tmp: anyhow::Result<()> = if l.is_empty() {
+                        Ok(())
+                    } else {
+                        let parts = l
+                            .split_once(":")
+                            .context("frontmatter lines need to contain a colon, got {l:?}")?;
+                        let name = parts.0.trim();
+                        let (vals, is_multi) = parse_prop_values(parts.1);
+                        props.push(Property::new(name.to_string(), !is_multi, vals));
+                        Ok(())
+                    };
+                    tmp
+                })?;
+                return Ok(DocumentComponent::new(DocumentElement::Frontmatter(props)));
+            }
+            _ => {
+                text.push_str(lexer.slice());
+            }
+        }
+    }
+    bail!("Reached the end of frontmatter!");
 }
 
 fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
@@ -307,28 +396,66 @@ fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Resul
     let pd = parse_zk_text(&text, file_dir)?;
     Ok(DocumentElement::ListElement(pd, vec![]))
 }
+
+#[instrument(skip_all)]
+fn consume_tokens(lexer: &mut Lexer<'_, ZkToken>) -> Result<()> {
+    while let Some(result) = lexer.next() {
+        debug!("{result:?}; {:?}", lexer.slice());
+        let token = result.unwrap();
+        if matches!(token, ZkToken::SingleHash) {
+            consume_tokens(lexer).unwrap();
+        }
+    }
+    Ok(())
+}
+
+#[instrument]
 fn parse_heading(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentElement> {
     use ZkToken::*;
     let mut level = 1;
     let mut text = String::new();
-    while let Some(Ok(token)) = lexer.next() {
-        match token {
-            SingleHash => {
-                level += 1;
-            }
-            Space => text.push_str(lexer.slice()),
-            Name => text.push_str(lexer.slice()),
-            MiscText => text.push_str(lexer.slice()),
-            CarriageReturn => text.push('\r'),
-            Newline => return Ok(DocumentElement::Heading(level, text)),
-            Backslash => text.push_str(lexer.slice()),
-            other => bail!(
-                "Failed to parse heading! {other:?}: {}",
+    let mut start = true;
+    while let Some(result) = lexer.next() {
+        debug!("got {result:?} for {:?}", lexer.slice());
+        let token = match result {
+            Err(_) => bail!(
+                "Failed to parse heading! {result:?}; {}",
                 construct_error_details(lexer)
             ),
+            Ok(token) => token,
+        };
+        match token {
+            SingleHash => {
+                if start {
+                    level += 1;
+                } else {
+                    text.push_str(lexer.slice());
+                }
+            }
+            Newline => {
+                let res = Ok(DocumentElement::Heading(level, text));
+                debug!("result: {res:?}");
+                return res;
+            }
+            other => {
+                start = false;
+                let txt = lexer.slice();
+                if txt.ends_with('\n') {
+                    text.push_str(txt.trim_end());
+                    let res = Ok(DocumentElement::Heading(level, text));
+                    debug!("result: {res:?}");
+                    return res;
+                } else if txt.contains('\n') {
+                    bail!("parse heading: encountered newline in the middle of slice {txt:?} for token {other:?}!")
+                } else {
+                    text.push_str(txt);
+                }
+            }
         }
     }
-    Ok(DocumentElement::Heading(level, text))
+    let res = Ok(DocumentElement::Heading(level, text));
+    debug!("result: {res:?}");
+    res
 }
 
 fn parse_adnote(
@@ -503,7 +630,7 @@ fn test_image_embed_conversion() {
 #### Initial Algorithm";
     let res = parse_zk_text(test_text, &None);
     if let Ok(pd) = res {
-        println!("{pd:?}");
+        debug!("{pd:?}");
         let zk_text = pd.to_zk_text(&None);
         assert_eq!(zk_text, test_text);
     } else {
@@ -536,8 +663,52 @@ fn test_simple_list() {
 
 #[test]
 fn test_nested_list() {
-    let text = "- item 1\n    - item 1.1\n    - item 1.2\n- item 2\n    -  item 2.1";
+    let text = "- item 1\n    - item 1.1\n    - item 1.2\n- item 2\n    - item 2.1";
     let res = parse_zk_text(text, &None);
+    if let Ok(pd) = res {
+        let res = pd.to_zk_text(&None);
+        assert_eq!(text.replace("    ", "\t"), res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_curly_heading_list() {
+    let text = "# {{test}}";
+    let res = parse_zk_text(text, &None);
+    if let Ok(pd) = res {
+        let res = pd.to_zk_text(&None);
+        assert_eq!(text.replace("    ", "\t"), res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+#[test]
+fn test_yt_template() {
+    let text = "---
+date: 2024-12-01 12:05:11
+tags: [video, youtube]
+---
+
+# {{blabla}}
+- channel::= 
+- status::= inbox
+";
+    let res = parse_zk_text(text, &None);
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let res = pd.to_zk_text(&None);
+        assert_eq!(text.replace("    ", "\t").trim(), res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+#[test]
+fn test_curly_braces() {
+    let text = "{{blabla}}";
+    let res = parse_zk_text(text, &None);
+    debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
         assert_eq!(text.replace("    ", "\t"), res);

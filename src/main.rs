@@ -1,5 +1,10 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+extern crate tracing;
+use tracing::{debug, instrument};
+
 mod file_checklist;
 use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
@@ -80,6 +85,8 @@ enum Commands {
         graph_root: PathBuf,
         #[arg(short, long, default_value_t = false)]
         complete_tasks: bool,
+        #[arg(short, long, required = false)]
+        mode: Option<TextMode>,
     },
 }
 
@@ -96,12 +103,20 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+
     let res: Result<()> = match cli.command {
         Some(Commands::Todoi {
             graph_root,
             complete_tasks,
+            mode,
         }) => {
-            todoi::main(graph_root, complete_tasks)?;
+            let mode = mode.unwrap_or(TextMode::LogSeq);
+            todoi::main(graph_root, complete_tasks, mode)?;
             Ok(())
         }
         Some(Commands::Checklist {

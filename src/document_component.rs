@@ -5,10 +5,11 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use tracing::{debug, instrument};
 
 use crate::{
     parse::{parse_file, TextMode},
-    util::{self, files_in_tree, indent_level},
+    util::{self, ends_with_blank_line, files_in_tree, indent_level, starts_with_blank_line},
 };
 
 #[derive(Clone, Debug)]
@@ -159,16 +160,22 @@ impl ParsedDocument {
             .flat_map(|c| c.mentioned_files().into_iter())
             .collect()
     }
-
+    #[instrument]
     pub fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
-        println!("{self:?}");
         let mut res = String::new();
         self.components().iter().for_each(|c| {
-            if !res.is_empty() && c.should_have_own_block() {
+            let cblock = c.should_have_own_block();
+            let text = c.to_zk_text(file_info);
+            if !res.is_empty()
+                && cblock
+                && !ends_with_blank_line(&res)
+                && !starts_with_blank_line(&text)
+            {
                 res.push('\n');
             }
-            res.push_str(&c.to_zk_text(file_info));
+            res.push_str(&text);
         });
+        debug!("result: {res:?}");
 
         res
     }
@@ -265,6 +272,33 @@ impl Display for MentionedFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Property {
+    name: String,
+    is_single: bool,
+    values: Vec<String>,
+}
+impl Property {
+    pub fn new(name: String, is_single: bool, values: Vec<String>) -> Self {
+        Self {
+            name,
+            is_single,
+            values,
+        }
+    }
+    pub fn has_name(&self, name: &str) -> bool {
+        self.name == name
+    }
+
+    pub fn add_values(&mut self, values: &[String]) {
+        values.iter().for_each(|v| {
+            if !self.values.contains(v) {
+                self.values.push(v.to_string());
+            }
+        });
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DocumentElement {
     Heading(u16, String),
     /// file, optional section, optional rename
@@ -279,7 +313,8 @@ pub enum DocumentElement {
     /// list item, map stores additional properties
     ListElement(ParsedDocument, Vec<(String, String)>),
 
-    Properties(Vec<(String, Vec<String>)>),
+    Properties(Vec<Property>),
+    Frontmatter(Vec<Property>),
 }
 
 impl DocumentElement {
@@ -291,11 +326,14 @@ impl DocumentElement {
         let mut tmp = self.clone();
         tmp.cleanup();
         match self {
+            Frontmatter(_props) => {
+                todo!("frontmatter to logseq")
+            }
             Properties(props) => {
                 let mut res = String::new();
-                props.iter().for_each(|(key, vals)| {
-                    let value = vals.join(", ");
-                    res.push_str(key);
+                props.iter().for_each(|p| {
+                    let value = p.values.join(", ");
+                    res.push_str(&p.name);
                     res.push_str(":: ");
                     res.push_str(&value);
                 });
@@ -306,7 +344,7 @@ impl DocumentElement {
                 let hashes = "#".repeat(*level as usize).to_string();
                 format!("- {hashes} {title}")
             }
-            // todo use other parsed properties
+            // TODO: use other parsed properties
             FileLink(file, _, _) => format!("[[{file}]]"),
             FileEmbed(file, _) => {
                 let file_name = match file {
@@ -323,7 +361,7 @@ impl DocumentElement {
                     if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
                         if let Some((name, ext)) = file_name.rsplit_once('.') {
                             if ["png", "jpeg"].contains(&ext) {
-                                println!("image: {file_name}: {file_info:?}");
+                                debug!("image: {file_name}: {file_info:?}");
                                 let dest_dir = dest_file.parent().unwrap();
                                 let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
                                 if let Some(rel) = rel {
@@ -332,7 +370,7 @@ impl DocumentElement {
                                         rel.to_string_lossy().replace("\\", "/")
                                     );
                                 } else {
-                                    println!("{image_out:?} and {dest_file:?} don't share a path!")
+                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
                                 }
                             }
                         }
@@ -446,19 +484,40 @@ impl DocumentElement {
             }
         }
     }
-
+    #[instrument]
     fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
         use DocumentElement::*;
         let mut tmp = self.clone();
         tmp.cleanup();
-        match self {
+        let res = match self {
+            Frontmatter(props) => {
+                let mut res = String::from("---");
+                props.iter().for_each(|p| {
+                    let vals = p.values.join(", ");
+                    let value = if p.is_single {
+                        vals
+                    } else {
+                        format!("[{vals}]")
+                    };
+                    res.push('\n');
+                    res.push_str(&format!("{}: {value}", p.name));
+                });
+                res.push_str("\n---");
+                res
+            }
             Properties(props) => {
-                let mut res = String::new();
-                props.iter().for_each(|(key, vals)| {
-                    let value = vals.join(", ");
-                    res.push_str(key);
-                    res.push_str(":: ");
-                    res.push_str(&value);
+                let mut res = String::from("");
+                props.iter().for_each(|p| {
+                    let vals = p.values.join(", ");
+                    let value = if p.is_single {
+                        vals
+                    } else {
+                        format!("[{vals}]")
+                    };
+                    if !res.is_empty() {
+                        res.push('\n');
+                    }
+                    res.push_str(&format!("{}::= {value}", p.name));
                 });
                 res
             }
@@ -467,8 +526,38 @@ impl DocumentElement {
                 let hashes = "#".repeat(*level as usize).to_string();
                 format!("{hashes} {title}")
             }
-            // todo use other parsed properties
-            FileLink(file, _, _) => format!("[[{file}]]"),
+            //TODO: use other parsed properties
+            FileLink(file, _, name) => {
+                match file {
+                    MentionedFile::FileName(_) => {
+                        todo!("handel zk conversion for mentioned file names")
+                    }
+                    MentionedFile::FilePath(p) => {
+                        debug!("file link: {file:?}; {name:?}");
+                        let mut p = p.clone();
+                        if let Some(file_info) = file_info {
+                            if let Some(dest) = &file_info.destination_file {
+                                if let Some(parent) = dest.parent() {
+                                    let rel = pathdiff::diff_paths(&p, parent);
+                                    debug!("determined relative path {rel:?}");
+                                    if let Some(rel) = rel {
+                                        p = rel;
+                                    }
+                                }
+                            }
+                        }
+                        let p = p.as_os_str();
+                        let p = p.to_string_lossy();
+                        if let Some(name) = name {
+                            format!("[{name}]({p})")
+                        } else {
+                            format!("[{p}]({p})")
+                        }
+                    }
+                }
+
+                //format!("[[{file}]]")
+            }
             FileEmbed(file, _) => {
                 let file_name = match file {
                     MentionedFile::FileName(name) => name,
@@ -484,7 +573,7 @@ impl DocumentElement {
                     if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
                         if let Some((name, ext)) = file_name.rsplit_once('.') {
                             if ["png", "jpeg"].contains(&ext) {
-                                println!("image: {file_name}: {file_info:?}");
+                                debug!("image: {file_name}: {file_info:?}");
                                 let dest_dir = dest_file.parent().unwrap();
                                 let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
                                 if let Some(rel) = rel {
@@ -493,7 +582,7 @@ impl DocumentElement {
                                         rel.to_string_lossy().replace("\\", "/")
                                     );
                                 } else {
-                                    println!("{image_out:?} and {dest_file:?} don't share a path!")
+                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
                                 }
                             }
                         }
@@ -504,7 +593,7 @@ impl DocumentElement {
             }
             Text(text) => text.to_string(),
             Admonition(s, props) => {
-                // todo: proper implementation, how should admonitions be represented?
+                // TODO: proper implementation, how should admonitions be represented?
                 let mut res = "- #+BEGIN_QUOTE".to_string();
                 if let Some(title) = props.get("title") {
                     res.push('\n');
@@ -537,17 +626,18 @@ impl DocumentElement {
             }
             ListElement(pd, properties) => {
                 let text = pd.to_zk_text(file_info);
+                debug!("{self:?}: inner converted to '{text:?}'.");
+                let text = text.trim_start();
                 let mut res = String::new();
-                // todo: use proper properties format
                 if !properties.is_empty() {
                     properties
                         .iter()
                         .enumerate()
                         .for_each(|(index, (key, value))| {
                             let line = if value.is_empty() {
-                                format!("{key}::")
+                                format!("{key}::=")
                             } else {
-                                format!("{key}:: {value}")
+                                format!("{key}::= {value}")
                             };
                             if index > 0 {
                                 res.push_str("\n  ");
@@ -570,7 +660,9 @@ impl DocumentElement {
                 }
                 res
             }
-        }
+        };
+        debug!("result: {res:?}");
+        res
     }
 
     pub fn get_document_component(
@@ -611,6 +703,7 @@ impl DocumentElement {
     fn should_have_own_block(&self) -> bool {
         use DocumentElement::*;
         match self {
+            Frontmatter(_) => true,
             Text(_) => self.is_empty_lines(),
             Heading(_, _) => true,
             Admonition(_, _) => true,
@@ -701,19 +794,28 @@ impl DocumentComponent {
             .collect();
         res
     }
-
+    #[instrument]
     fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
-        let res = [self.element.to_zk_text(file_info)]
-            .into_iter()
-            .chain(self.children.iter().map(|c| {
-                let mut res = String::new();
-                c.to_zk_text(file_info).lines().for_each(|line| {
-                    let _ = res.write_str("\n\t");
-                    let _ = res.write_str(line);
-                });
-                res
-            }))
-            .collect();
+        let mut res = self.element.to_zk_text(file_info);
+        self.children.iter().enumerate().for_each(|(i, c)| {
+            let text = c.to_zk_text(file_info);
+            if !starts_with_blank_line(&text)
+                && (i > 0 && self.children[i - 1].should_have_own_block())
+                || c.should_have_own_block()
+            {
+                res.push('\n');
+            }
+            text.lines().enumerate().for_each(|(i, l)| {
+                if i > 1 {
+                    res.push('\n');
+                }
+                if !l.is_empty() {
+                    res.push('\t');
+                    res.push_str(l);
+                }
+            });
+        });
+        debug!("result: {res:?}");
         res
     }
 
@@ -777,9 +879,14 @@ impl DocumentComponent {
         res
     }
 
+    pub fn get_element(&self) -> &DocumentElement {
+        &self.element
+    }
+
     pub fn get_element_mut(&mut self) -> &mut DocumentElement {
         &mut self.element
     }
+
     pub fn get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
         self.children.get_mut(n)
     }
@@ -811,8 +918,11 @@ impl DocumentComponent {
         res
     }
 
+    #[instrument]
     fn should_have_own_block(&self) -> bool {
-        self.element.should_have_own_block()
+        let res = self.element.should_have_own_block();
+        debug!("{res}");
+        res
     }
 }
 

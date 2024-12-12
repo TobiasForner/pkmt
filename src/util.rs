@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use regex::Captures;
+use tracing::{debug, instrument};
 
 pub const SPACES_PER_INDENT: usize = 4;
 
@@ -75,6 +76,27 @@ pub fn trim_like_first_line_plus(text: &str, extra: usize) -> String {
         }
     });
     res
+}
+#[instrument]
+pub fn ends_with_blank_line(text: &str) -> bool {
+    debug!("text: {text:?}");
+    let lines = text.lines();
+    if let Some(l) = lines.last() {
+        l.trim().is_empty()
+    } else {
+        false
+    }
+}
+
+#[instrument]
+pub fn starts_with_blank_line(text: &str) -> bool {
+    debug!("text: {text:?}");
+    let mut lines = text.lines();
+    if let Some(l) = lines.next() {
+        l.trim().is_empty()
+    } else {
+        false
+    }
 }
 
 pub fn files_in_tree<T: AsRef<Path>>(

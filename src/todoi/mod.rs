@@ -3,31 +3,39 @@ mod interactive;
 mod todoist_api;
 mod youtube_details;
 use std::{
+    fmt::Debug,
+    fs::{DirEntry, FileType, ReadDir},
     path::{Path, PathBuf},
     str::FromStr,
+    vec,
 };
+use test_log::test;
 
-use anyhow::Result;
-use clap::Command;
-use interactive::handle_interactive_data;
+use anyhow::{anyhow, bail, Context, Result};
+use interactive::{get_interactive_data, handle_interactive_data};
 use regex::Regex;
+use tracing::{debug, info, instrument};
 
 use crate::{
-    document_component::{DocumentComponent, ParsedDocument},
+    document_component::{
+        DocumentComponent, DocumentElement, FileInfo, MentionedFile, ParsedDocument,
+    },
     logseq_parsing::parse_logseq_file,
+    parse::{parse_file, TextMode},
     todoi::{
         config::Config,
         interactive::{handle_interactive, Resolution},
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
     },
-    zk_parsing,
+    zk_parsing::{self, parse_zk_text},
 };
 
 #[derive(Debug)]
 pub struct LogSeqTemplates {
     templates_pd: ParsedDocument,
 }
+
 impl LogSeqTemplates {
     pub fn new(logseq_graph_root: &Path) -> Result<Self> {
         let templates_file = logseq_graph_root
@@ -50,6 +58,7 @@ impl LogSeqTemplates {
                 _ => false,
             })
     }
+
     pub fn template_names(&self) -> Vec<String> {
         use crate::document_component::DocumentElement::ListElement;
         let mut res = vec![];
@@ -71,9 +80,10 @@ impl LogSeqTemplates {
         res
     }
 }
+
 /// gathers tasks and calls the correct handler
 /// tasks are marked as completed if complete_tasks is set
-pub fn main(root_dir: PathBuf, complete_tasks: bool) -> Result<()> {
+pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<()> {
     let config = Config::parse(PathBuf::from_str(
         "/mnt/c/Users/Tobias/AppData/Local/todoist_import/todoist_import/todoi_config.toml",
     )?);
@@ -81,8 +91,14 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool) -> Result<()> {
     let inbox = todoist_api.get_inbox()?;
 
     let inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
-    println!("Retrieved todoist tasks.");
-    let completed_tasks = add_to_logseq(root_dir, &inbox_tasks, &config)?;
+    info!("Retrieved todoist tasks.");
+    debug!("mode: {mode:?}");
+
+    let completed_tasks = match mode {
+        TextMode::Zk => add_to_zk(root_dir, &inbox_tasks, &config),
+        TextMode::LogSeq => add_to_logseq(root_dir, &inbox_tasks, &config),
+        TextMode::Obsidian => todo!("not implemented!"),
+    }?;
 
     if complete_tasks {
         completed_tasks.iter().for_each(|t| {
@@ -93,43 +109,263 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool) -> Result<()> {
     Ok(())
 }
 
+#[instrument(skip_all)]
+fn add_to_zk(
+    zk_root_dir: PathBuf,
+    inbox_tasks: &[TodoistTask],
+    config: &Config,
+) -> Result<Vec<TodoistTask>> {
+    let mut zk_handler = ZkHandler::new(zk_root_dir);
+    let res = handle_tasks(inbox_tasks, &mut zk_handler, config);
+    debug!("handled tasks");
+    res
+}
+
+#[derive(Debug)]
+struct ZkHandler {
+    root_dir: PathBuf,
+}
+impl ZkHandler {
+    fn new(root_dir: PathBuf) -> Self {
+        Self { root_dir }
+    }
+    #[instrument]
+    fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
+        use std::process::Command;
+        debug!("trying to get zk file for {title}");
+        let output = Command::new("zk")
+            .arg("new")
+            .arg("--no-input")
+            .arg(format!("--title={title}"))
+            .arg(format!("--template={}", template_path.to_str().unwrap()))
+            .arg("-p")
+            .output()
+            .context(format!("failed to retrieve zk file for {title}"))?;
+        let p = std::str::from_utf8(&output.stdout)?;
+        Ok(PathBuf::from_str(p.trim())?)
+    }
+
+    #[instrument]
+    fn get_zk_journal_file() -> Result<PathBuf> {
+        use std::process::Command;
+        let output = Command::new("zk").arg("daily-path").output()?;
+        let p = std::str::from_utf8(&output.stdout)?.trim();
+        debug!("daily path: {p:?}");
+        Ok(PathBuf::from_str(p)?)
+    }
+
+    #[instrument()]
+    fn add_to_zk_pd(&self, pd: &mut ParsedDocument, task_data: &TaskData) -> bool {
+        let frontmatter = pd.get_document_component_mut(&|dc| {
+            let elem = dc.get_element();
+            matches!(elem, DocumentElement::Frontmatter(_))
+        });
+
+        let tags_to_add: Vec<String> = task_data
+            .get_tags()
+            .iter()
+            .map(|t| t.trim_start_matches('#').to_string())
+            .collect();
+
+        let tags_success = if let Some(dc) = frontmatter {
+            if let DocumentElement::Frontmatter(properties) = dc.get_element_mut() {
+                for p in properties {
+                    if p.has_name("tags") {
+                        p.add_values(&tags_to_add);
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if tags_success {
+            match task_data {
+                TaskData::Sbs(url, author, _, _) => {
+                    self.fill_property(pd, "url", &[url.to_string()]);
+                    if let Some(author) = author {
+                        self.fill_property(pd, "author", &[author.to_string()]);
+                    }
+                }
+                TaskData::Youtube(url, title, channel, _) => {
+                    self.fill_property(pd, "url", &[url.to_string()]);
+                    self.fill_property(pd, "channel", &[channel.to_string()]);
+                    self.fill_property(pd, "description", &[title.to_string()]);
+                }
+                TaskData::YtPlaylist(url, channel, _) => {
+                    self.fill_property(pd, "url", &[url.to_string()]);
+                    self.fill_property(pd, "channel", &[channel.to_string()]);
+                }
+                TaskData::Unhandled => {
+                    return false;
+                }
+                TaskData::Interactive(_, url, _, _) => {
+                    if let Some(url) = url {
+                        debug!("filled in url");
+                        self.fill_property(pd, "url", &[url.to_string()]);
+                    }
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    #[instrument]
+    fn append_to_zk_journal(&self, dc: DocumentComponent) -> Result<bool> {
+        let journal_path = ZkHandler::get_zk_journal_file()?;
+        let mut pd = parse_file(&journal_path, TextMode::Zk)?;
+        debug!("adding {dc:?} to journal file");
+        pd.add_component(dc);
+        let file_info =
+            FileInfo::try_new(journal_path.clone(), Some(journal_path.clone()), None, None)?;
+        let journal_text = pd.to_zk_text(&Some(file_info));
+        debug!("new journal text: {journal_text:?}");
+
+        std::fs::write(&journal_path, journal_text)
+            .context(format!("Could not write file {journal_path:?}"))?;
+        Ok(true)
+    }
+
+    #[instrument]
+    fn fill_property(&self, pd: &mut ParsedDocument, prop_name: &str, values: &[String]) {
+        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
+            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+            _ => false,
+        });
+        if let Some(prop) = property {
+            if let DocumentElement::Properties(props) = prop.get_element_mut() {
+                props.iter_mut().for_each(|p| {
+                    if p.has_name(prop_name) {
+                        p.add_values(values);
+                    }
+                });
+            }
+        }
+    }
+}
+
+impl TaskDataHandler for ZkHandler {
+    #[instrument]
+    fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
+        debug!("handling {task_data:?}");
+        let Some(title) = task_data.get_title() else {
+            debug!("no title!");
+            return Ok(false);
+        };
+        let template_file = match task_data {
+            TaskData::Youtube(_url, _, _channel, _tags) => {
+                self.root_dir.join(".zk/templates/yt_video.md")
+            }
+            TaskData::Sbs(_, _, _, _) => self.root_dir.join(".zk/templates/article.md"),
+            TaskData::YtPlaylist(_, _, _) => self.root_dir.join(".zk/templates/yt_playlist.md"),
+            TaskData::Interactive(template_name, _, _, _) => {
+                self.root_dir.join(".zk/templates").join(template_name)
+            }
+            _ => todo!("not implemented: conversion of {task_data:?} to zk."),
+        };
+        debug!("using template {template_file:?}");
+        let Ok(zk_file) = ZkHandler::get_zk_file(&title, template_file) else {
+            return Ok(false);
+        };
+        debug!("parsing: {zk_file:?}");
+        let pd = zk_parsing::parse_zk_file(&zk_file);
+        debug!("{pd:?}");
+        let mut pd = pd?;
+        let success = self.add_to_zk_pd(&mut pd, task_data);
+        if success {
+            let file_info = FileInfo::try_new(zk_file.clone(), Some(zk_file.clone()), None, None)?;
+            let text = pd.to_zk_text(&Some(file_info));
+            debug!("added {task_data:?} to pd with result: {text:?}");
+            let _ = std::fs::write(&zk_file, text);
+            let mention = DocumentComponent::new(DocumentElement::FileLink(
+                MentionedFile::FilePath(zk_file),
+                None,
+                Some(title),
+            ));
+            let journal_mention = DocumentComponent::new(DocumentElement::ListElement(
+                ParsedDocument::ParsedText(vec![mention]),
+                vec![],
+            ));
+            let success = self.append_to_zk_journal(journal_mention)?;
+            Ok(success)
+        } else {
+            debug!("failed to add {task_data:?}");
+            Ok(false)
+        }
+    }
+
+    fn get_template_names(&self) -> Result<Vec<String>> {
+        // TODO: remove unwraps
+        let p = self.root_dir.join(".zk/templates");
+        let dir_entries: Vec<DirEntry> = p
+            .read_dir()?
+            .map(|f| f.context(""))
+            .collect::<Result<Vec<DirEntry>>>()?;
+        let res: Result<Vec<Option<String>>> = dir_entries
+            .into_iter()
+            .map(|f| match f.file_type() {
+                Ok(ft) => {
+                    if ft.is_file() {
+                        let name = f.file_name().into_string();
+                        let tmp: Result<String> = match name {
+                            std::result::Result::Ok(s) => anyhow::Ok(s),
+                            std::result::Result::Err(s) => bail!("{s:?}"),
+                        };
+                        tmp.map(Some)
+                        //let tmp: Result<String> = f.file_name().into_string();
+                        //Ok(Some(name))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                _ => bail!(""),
+            })
+            .collect();
+        let res: Vec<String> = res?.into_iter().flatten().collect();
+        Ok(res)
+    }
+}
+
 fn add_to_logseq(
     logseq_graph_root: PathBuf,
     inbox_tasks: &[TodoistTask],
     config: &Config,
 ) -> Result<Vec<TodoistTask>> {
-    let today = chrono::offset::Local::now();
-    let todays_journal_file = logseq_graph_root
-        .join("journals")
-        .join(today.format("%Y_%m_%d.md").to_string());
-    let todays_journal = if todays_journal_file.exists() {
-        println!("loaded existing journal file");
-        parse_logseq_file(&todays_journal_file)?
-    } else {
-        println!("creating new journal file!");
-        ParsedDocument::ParsedFile(vec![], todays_journal_file.clone())
-    };
+    /*let today = chrono::offset::Local::now();
+        let todays_journal_file = logseq_graph_root
+            .join("journals")
+            .join(today.format("%Y_%m_%d.md").to_string());
+        let todays_journal = if todays_journal_file.exists() {
+            println!("loaded existing journal file");
+            parse_logseq_file(&todays_journal_file)?
+        } else {
+            println!("creating new journal file!");
+            ParsedDocument::ParsedFile(vec![], todays_journal_file.clone())
+        };
 
-    // remove empty list elements from the end of the journal
-    let mut end = true;
-    let filtered_components = todays_journal
-        .components()
-        .iter()
-        .rev()
-        .filter(|c| {
-            if !c.is_empty_list() {
-                end = false;
-                true
-            } else {
-                !end
-            }
-        })
-        .cloned()
-        .rev()
-        .collect();
-    let mut todays_journal = todays_journal.with_components(filtered_components);
-    let templates = LogSeqTemplates::new(&logseq_graph_root)?;
-
+        // remove empty list elements from the end of the journal
+        let mut end = true;
+        let filtered_components = todays_journal
+            .components()
+            .iter()
+            .rev()
+            .filter(|c| {
+                if !c.is_empty_list() {
+                    end = false;
+                    true
+                } else {
+                    !end
+                }
+            })
+            .cloned()
+            .rev()
+            .collect();
+        let mut todays_journal = todays_journal.with_components(filtered_components);
+        let templates = LogSeqTemplates::new(&logseq_graph_root)?;
+    */
     /*
     let mut completed_tasks =
         handle_youtube_tasks(&inbox_tasks, &templates, &mut todays_journal, &config);
@@ -170,17 +406,14 @@ fn add_to_logseq(
             }
         }
     });*/
-    let completed_tasks = handle_tasks(inbox_tasks, &templates, &mut todays_journal, config);
-    std::fs::write(todays_journal_file, todays_journal.to_logseq_text(&None))?;
-    Ok(completed_tasks)
+    let mut logseq_handler = LogSeqHandler::new(logseq_graph_root)?;
+    handle_tasks(inbox_tasks, &mut logseq_handler, config)
 }
 
-fn handle_tasks(
+fn get_task_data_non_interactive(
     tasks: &[TodoistTask],
-    templates: &LogSeqTemplates,
-    journal_file: &mut ParsedDocument,
     config: &Config,
-) -> Vec<TodoistTask> {
+) -> Vec<(TaskData, TodoistTask)> {
     let tasks = tasks.iter().map(|t| (handle_youtube_task(t, config), t));
     let tasks = tasks.map(|(td, task)| match td {
         TaskData::Unhandled => (handle_sbs_task(task), task),
@@ -190,33 +423,216 @@ fn handle_tasks(
         TaskData::Unhandled => (handle_youtube_playlist(task, config), task),
         _ => (td, task),
     });
+    tasks.map(|(td, task)| (td, task.clone())).collect()
+}
 
-    // handle interactive
-    let mut cancelled = false;
-    let tasks = tasks.map(|(td, task)| match td {
-        TaskData::Unhandled => {
-            if !cancelled {
-                let (res, td) = handle_interactive_data(task, templates, config);
-                println!("{task:?}: {res:?}");
-                match res {
-                    Resolution::Cancel => {
-                        cancelled = true;
-                    }
-                    Resolution::Skip => {}
-                    Resolution::Complete => {}
+trait TaskDataHandler {
+    fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool>;
+    fn get_template_names(&self) -> Result<Vec<String>>;
+}
+#[derive(Debug)]
+struct LogSeqHandler {
+    templates: LogSeqTemplates,
+    todays_journal: ParsedDocument,
+    todays_journal_file: PathBuf,
+}
+
+impl LogSeqHandler {
+    fn new(graph_root: PathBuf) -> Result<Self> {
+        let today = chrono::offset::Local::now();
+        let todays_journal_file = graph_root
+            .join("journals")
+            .join(today.format("%Y_%m_%d.md").to_string());
+        let todays_journal = if todays_journal_file.exists() {
+            println!("loaded existing journal file");
+            parse_logseq_file(&todays_journal_file)?
+        } else {
+            println!("creating new journal file!");
+            ParsedDocument::ParsedFile(vec![], todays_journal_file.clone())
+        };
+
+        // remove empty list elements from the end of the journal
+        let mut end = true;
+        let filtered_components = todays_journal
+            .components()
+            .iter()
+            .rev()
+            .filter(|c| {
+                if !c.is_empty_list() {
+                    end = false;
+                    true
+                } else {
+                    !end
                 }
-                (td, task)
-            } else {
-                (td, task)
+            })
+            .cloned()
+            .rev()
+            .collect();
+        let todays_journal = todays_journal.with_components(filtered_components);
+        let templates = LogSeqTemplates::new(&graph_root)?;
+        let res = LogSeqHandler {
+            templates,
+            todays_journal,
+            todays_journal_file,
+        };
+        Ok(res)
+    }
+}
+
+impl TaskDataHandler for LogSeqHandler {
+    fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
+        use crate::document_component::DocumentElement::ListElement;
+        use TaskData::*;
+        match task_data {
+            Youtube(url, title, channel, tags) => {
+                let mut yt_template = self
+                    .templates
+                    .get_template_comp("youtube")
+                    .expect("No youtube template!")
+                    .clone();
+                if let ListElement(_, props) = yt_template.get_element_mut() {
+                    let mut add = vec![];
+                    add.push(("authors", vec![format!("[[{}]]", channel)]));
+                    add.push(("description", vec![title.clone()]));
+                    add.push(("tags", tags.clone()));
+                    *props = fill_properties(props, &add, &["template"]);
+
+                    // add embed
+                    let embed_block = yt_template
+                        .get_nth_child_mut(0)
+                        .unwrap()
+                        .get_nth_child_mut(0)
+                        .unwrap();
+
+                    let embed = if url.contains("/shorts/") {
+                        DocumentComponent::new_text(url)
+                    } else {
+                        DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
+                    };
+                    let pd = ParsedDocument::ParsedText(vec![embed]);
+                    let elem = ListElement(pd, vec![]);
+                    embed_block.element = elem;
+                }
+                self.todays_journal.add_component(yt_template);
+            }
+            TaskData::Sbs(url, author, title, tags) => {
+                if let Some(comp) = self.templates.get_template_comp("article") {
+                    let mut comp = comp.clone();
+                    if let ListElement(_, props) = comp.get_element_mut() {
+                        let mut source = vec!["[[Stronger by Science]]".to_string()];
+                        if let Some(author) = author {
+                            source.push(author.clone());
+                        }
+                        let url = vec![url.clone()];
+                        let mut add: Vec<(&str, Vec<String>)> =
+                            vec![("source", source), ("url", url), ("tags", tags.clone())];
+                        if let Some(title) = title {
+                            add.push(("description", vec![title.clone()]));
+                        }
+                        *props = fill_properties(props, &add, &["template"]);
+                        self.todays_journal.add_component(comp);
+                    }
+                }
+            }
+            TaskData::YtPlaylist(url, channel, title) => {
+                let mut temp = self
+                    .templates
+                    .get_template_comp("youtube_playlist")
+                    .unwrap();
+                if let ListElement(_, props) = temp.get_element_mut() {
+                    *props = fill_properties(
+                        props,
+                        &[
+                            ("description", vec![title.to_string()]),
+                            ("authors", vec![format!("[[{channel}]]")]),
+                            ("url", vec![url.to_string()]),
+                        ],
+                        &["template"],
+                    );
+                    self.todays_journal.add_component(temp);
+                }
+            }
+            TaskData::Interactive(template_name, url, title, tags) => {
+                let mut comp = self.templates.get_template_comp(template_name).unwrap();
+                if let ListElement(_, props) = comp.get_element_mut() {
+                    let mut add = vec![];
+                    if let Some(title) = title {
+                        add.push(("description", vec![title.clone()]));
+                    }
+                    add.push(("tags", tags.clone()));
+                    if let Some(url) = url {
+                        add.push(("url", vec![url.clone()]))
+                    }
+                    let new_props = fill_properties(props, &add, &["template"]);
+                    *props = new_props;
+                    self.todays_journal.add_component(comp);
+                }
+            }
+            _ => {
+                return Ok(false);
             }
         }
-        _ => (td, task),
-    });
 
+        std::fs::write(
+            &self.todays_journal_file,
+            self.todays_journal.to_logseq_text(&None),
+        )?;
+        Ok(true)
+    }
+    fn get_template_names(&self) -> Result<Vec<String>> {
+        Ok(self.templates.template_names())
+    }
+}
+
+fn get_task_data_full(
+    tasks: &[TodoistTask],
+    config: &Config,
+    template_names: &[String],
+) -> Vec<(TaskData, TodoistTask)> {
+    let tasks = get_task_data_non_interactive(tasks, config);
+    // handle interactive
+    let mut cancelled = false;
     tasks
-        .filter(|(td, _)| td.add_to_logseq_journal(templates, journal_file))
-        .map(|(_, task)| task.clone())
+        .into_iter()
+        .map(|(td, task)| match td {
+            TaskData::Unhandled => {
+                if !cancelled {
+                    let (res, td) = get_interactive_data(&task, template_names, config);
+                    println!("interactive resolution for {task:?}: {res:?} with {td:?}");
+                    if let Resolution::Cancel = res {
+                        cancelled = true;
+                    }
+                    (td, task)
+                } else {
+                    (td, task)
+                }
+            }
+            _ => (td, task),
+        })
         .collect()
+}
+
+#[instrument(skip_all)]
+fn handle_tasks<T>(
+    tasks: &[TodoistTask],
+    handler: &mut T,
+    config: &Config,
+) -> Result<Vec<TodoistTask>>
+where
+    T: TaskDataHandler + Debug,
+{
+    debug!("handler: {handler:?}");
+    let tasks = get_task_data_full(tasks, config, &handler.get_template_names()?);
+    let tasks: Result<Vec<(bool, TodoistTask)>> = tasks
+        .into_iter()
+        .map(|(td, task)| handler.handle_task_data(&td).map(|e| (e, task)))
+        .collect();
+    debug!("filtering handled tasks: {tasks:?}");
+    let tasks = tasks?
+        .iter()
+        .filter_map(|(done, task)| if *done { Some(task.clone()) } else { None })
+        .collect();
+    Ok(tasks)
 }
 
 pub fn test_zk(root_dir: PathBuf) {
@@ -247,125 +663,25 @@ pub enum TaskData {
 }
 
 impl TaskData {
-    fn add_to_zk(&self, root_dir: PathBuf) -> bool {
+    fn get_title(&self) -> Option<String> {
+        use TaskData::*;
         match self {
-            TaskData::Youtube(url, title, channel, tags) => {
-                let template_file = root_dir.join(".zk/templates/yt_video.md");
-                let Ok(zk_file) = TaskData::get_zk_file(title, template_file) else {
-                    return false;
-                };
-                let pd = zk_parsing::parse_zk_file(zk_file);
-                println!("{pd:?}");
-                true
-            }
-            _ => todo!("not implemented: conversion of {self:?} to zk."),
+            Youtube(_, title, _, _) => Some(title.to_string()),
+            Sbs(_, _, title, _) => title.clone(),
+            YtPlaylist(_, _, title) => Some(title.to_string()),
+            Interactive(_, _, title, _) => title.clone(),
+            _ => None,
         }
     }
-
-    fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
-        use std::process::Command;
-        let output = Command::new("zk")
-            .arg("new")
-            .arg("--no-input")
-            .arg(format!("--title={title}"))
-            .arg(format!("--template={}", template_path.to_str().unwrap()))
-            .arg("-p")
-            .output()?;
-        let p = std::str::from_utf8(&output.stdout)?;
-        Ok(PathBuf::from_str(p)?)
-    }
-    fn add_to_logseq_journal(
-        &self,
-        templates: &LogSeqTemplates,
-        journal_file: &mut ParsedDocument,
-    ) -> bool {
-        use crate::document_component::DocumentElement::ListElement;
+    fn get_tags(&self) -> Vec<String> {
+        use TaskData::*;
         match self {
-            TaskData::Youtube(url, title, channel, tags) => {
-                let mut yt_template = templates
-                    .get_template_comp("youtube")
-                    .expect("No youtube template!")
-                    .clone();
-                if let ListElement(_, props) = yt_template.get_element_mut() {
-                    let mut add = vec![];
-                    add.push(("authors", vec![format!("[[{}]]", channel)]));
-                    add.push(("description", vec![title.clone()]));
-                    add.push(("tags", tags.clone()));
-                    *props = fill_properties(props, &add, &["template"]);
-
-                    // add embed
-                    let embed_block = yt_template
-                        .get_nth_child_mut(0)
-                        .unwrap()
-                        .get_nth_child_mut(0)
-                        .unwrap();
-
-                    let embed = if url.contains("/shorts/") {
-                        DocumentComponent::new_text(url)
-                    } else {
-                        DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
-                    };
-                    let pd = ParsedDocument::ParsedText(vec![embed]);
-                    let elem = ListElement(pd, vec![]);
-                    embed_block.element = elem;
-                }
-                journal_file.add_component(yt_template);
-            }
-            TaskData::Sbs(url, author, title, tags) => {
-                if let Some(comp) = templates.get_template_comp("article") {
-                    let mut comp = comp.clone();
-                    if let ListElement(_, props) = comp.get_element_mut() {
-                        let mut source = vec!["[[Stronger by Science]]".to_string()];
-                        if let Some(author) = author {
-                            source.push(author.clone());
-                        }
-                        let url = vec![url.clone()];
-                        let mut add: Vec<(&str, Vec<String>)> =
-                            vec![("source", source), ("url", url), ("tags", tags.clone())];
-                        if let Some(title) = title {
-                            add.push(("description", vec![title.clone()]));
-                        }
-                        *props = fill_properties(props, &add, &["template"]);
-                        journal_file.add_component(comp);
-                    }
-                }
-            }
-            TaskData::YtPlaylist(url, channel, title) => {
-                let mut temp = templates.get_template_comp("youtube_playlist").unwrap();
-                if let ListElement(_, props) = temp.get_element_mut() {
-                    *props = fill_properties(
-                        props,
-                        &[
-                            ("description", vec![title.to_string()]),
-                            ("authors", vec![format!("[[{channel}]]")]),
-                            ("url", vec![url.to_string()]),
-                        ],
-                        &["template"],
-                    );
-                    journal_file.add_component(temp);
-                }
-            }
-            TaskData::Interactive(template_name, url, title, tags) => {
-                let mut comp = templates.get_template_comp(template_name).unwrap();
-                if let ListElement(_, props) = comp.get_element_mut() {
-                    let mut add = vec![];
-                    if let Some(title) = title {
-                        add.push(("description", vec![title.clone()]));
-                    }
-                    add.push(("tags", tags.clone()));
-                    if let Some(url) = url {
-                        add.push(("url", vec![url.clone()]))
-                    }
-                    let new_props = fill_properties(props, &add, &["template"]);
-                    *props = new_props;
-                    journal_file.add_component(comp);
-                }
-            }
-            _ => {
-                return false;
-            }
+            Unhandled => vec![],
+            Youtube(_, _, _, tags) => tags.clone(),
+            Sbs(_, _, _, tags) => tags.clone(),
+            YtPlaylist(_, _, _) => vec![],
+            Interactive(_, _, _, tags) => tags.clone(),
         }
-        true
     }
 }
 
@@ -393,34 +709,39 @@ fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
     TaskData::Unhandled
 }
 
+#[instrument]
 fn handle_sbs_task(task: &TodoistTask) -> TaskData {
     let sbs_link_re =
         Regex::new(r"https://ckarchive\.com/b/[a-zA-Z0-9]*\?ck_subscriber_id=2334581400").unwrap();
     let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
 
-    if sbs_link_re.captures(&task.content).is_some() {
-        let article_url = &task.content;
-
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let res = runtime.block_on(reqwest::get(article_url)).unwrap();
-        let text = runtime.block_on(res.text()).unwrap();
-        let author = if let Some(author) = author_re.captures(&text) {
-            let mut author = author.get(1).unwrap().as_str().to_string();
-            if author.ends_with('.') {
-                author.remove(author.len() - 1);
-            }
-            Some(author)
-        } else {
-            None
-        };
-        let title = if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>"))
-        {
-            Some(text[start + 7..end].to_string())
-        } else {
-            None
-        };
-        let tags = vec!["#Fitness".to_string()];
-        return TaskData::Sbs(article_url.clone(), author, title, tags);
+    if let Some(art_url) = sbs_link_re.captures(&task.content) {
+        if let Some(art_url) = art_url.get(0) {
+            let article_url = art_url.as_str();
+            debug!("found sbs url {article_url}");
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let res = runtime.block_on(reqwest::get(article_url)).unwrap();
+            let text = runtime.block_on(res.text()).unwrap();
+            let author = if let Some(author) = author_re.captures(&text) {
+                let mut author = author.get(1).unwrap().as_str().to_string();
+                if author.ends_with('.') {
+                    author.remove(author.len() - 1);
+                }
+                Some(author)
+            } else {
+                None
+            };
+            let title =
+                if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>")) {
+                    Some(text[start + 7..end].to_string())
+                } else {
+                    None
+                };
+            let tags = vec!["fitness".to_string()];
+            let res = TaskData::Sbs(article_url.to_string(), author, title, tags);
+            debug!("found {res:?} for {task:?}");
+            return res;
+        }
     }
     TaskData::Unhandled
 }
@@ -624,4 +945,40 @@ fn handle_sbs_tasks(
     } else {
         vec![]
     }
+}
+
+#[test]
+fn test_add_to_yt_pd() {
+    let text = "---
+date: 2024-12-31 01:09:55
+tags: [video, youtube, inbox]
+---
+
+# title
+- channel::= 
+- description::= 
+- url::= ";
+    let res = parse_zk_text(text, &None);
+    let Ok(mut pd) = res else {
+        panic!("parsing failed: {res:?}");
+    };
+    let zk_handler = ZkHandler::new("/home/tobias/kasten".into());
+    let task_data = TaskData::Youtube(
+        "url".to_string(),
+        "title".to_string(),
+        "test_channel".to_string(),
+        vec!["tag1".to_string(), "tag2".to_string()],
+    );
+    let _ = zk_handler.add_to_zk_pd(&mut pd, &task_data);
+    let res = pd.to_zk_text(&None);
+    let expected = "---
+date: 2024-12-31 01:09:55
+tags: [video, youtube, inbox, tag1, tag2]
+---
+
+# title
+- channel::= test_channel
+- description::= title
+- url::= url";
+    assert_eq!(res, expected);
 }
