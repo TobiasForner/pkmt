@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 extern crate tracing;
-use tracing::{debug, instrument};
 
 mod file_checklist;
 use document_component::{convert_file, convert_tree, FileInfo};
