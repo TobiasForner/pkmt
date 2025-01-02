@@ -10,7 +10,6 @@ use document_component::{convert_file, convert_tree, FileInfo};
 use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
 use parse::TextMode;
-use todoi::test_zk;
 use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
@@ -76,10 +75,7 @@ enum Commands {
         #[arg(required = true)]
         root_dir: PathBuf,
     },
-    Test {
-        #[arg(required = true)]
-        root_dir: PathBuf,
-    },
+    Test {},
     Todoi {
         #[arg(required = true)]
         graph_root: PathBuf,
@@ -134,9 +130,8 @@ fn run() -> Result<()> {
             similar_file_names(root_dir, 4);
             Ok(())
         }
-        Some(Commands::Test { root_dir }) => {
-            println!("{root_dir:?}");
-            test_zk(root_dir);
+        Some(Commands::Test {}) => {
+            println!("Only prints this message atm");
             Ok(())
         }
         Some(Commands::Convert {

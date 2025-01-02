@@ -635,20 +635,6 @@ where
     Ok(tasks)
 }
 
-pub fn test_zk(root_dir: PathBuf) {
-    let title = "test_title";
-    let template_file = root_dir.join(".zk/templates/yt_video.md");
-    use std::process::Command;
-    let output = Command::new("zk")
-        .arg("new")
-        .arg("--no-input")
-        .arg(format!("--title={title}"))
-        .arg(format!("--template={}", template_file.to_str().unwrap()))
-        .arg("-p")
-        .output();
-    println!("Got {output:?}");
-}
-
 #[derive(Debug)]
 pub enum TaskData {
     Unhandled,
@@ -737,6 +723,41 @@ fn handle_sbs_task(task: &TodoistTask) -> TaskData {
                 } else {
                     None
                 };
+            let tags = vec!["fitness".to_string()];
+            let res = TaskData::Sbs(article_url.to_string(), author, title, tags);
+            debug!("found {res:?} for {task:?}");
+            return res;
+        }
+    }
+
+    let sbs_website_re = Regex::new(r"https://www.strongerbyscience.com/[a-zA-Z-]+/").unwrap();
+    let author_re = Regex::new("<meta name=\"author\" content=\"([a-zA-Z\\s]+)\" />").unwrap();
+    if let Some(art_url) = sbs_website_re.captures(&task.content) {
+        if let Some(art_url) = art_url.get(0) {
+            let article_url = art_url.as_str();
+            debug!("found sbs website url {article_url}");
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let res = runtime.block_on(reqwest::get(article_url)).unwrap();
+            let text = runtime.block_on(res.text()).unwrap();
+
+            //println!("pos: {pos:?}; {text:?}");
+            let author = if let Some(author) = author_re.captures(&text) {
+                let mut author = author.get(1).unwrap().as_str().to_string();
+                if author.ends_with('.') {
+                    author.remove(author.len() - 1);
+                }
+                Some(author)
+            } else {
+                None
+            };
+            let title = if let (Some(start), Some(end)) =
+                (text.find("<title>"), text.find("</title>"))
+            {
+                let title = text[start + 7..end].trim_end_matches(" &#8226; Stronger by Science");
+                Some(title.to_string())
+            } else {
+                None
+            };
             let tags = vec!["fitness".to_string()];
             let res = TaskData::Sbs(article_url.to_string(), author, title, tags);
             debug!("found {res:?} for {task:?}");
