@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use regex::Regex;
 
 use crate::{document_component::ParsedDocument, todoi::fill_properties, util};
@@ -57,8 +57,9 @@ pub fn handle_interactive(
     if let ListElement(_, props) = comp.get_element_mut() {
         let mut add = vec![];
         let content = util::apply_substitutions(&task.content);
-        let url_re =
-            Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)");
+        let url_re = Regex::new(
+            r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@,]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)",
+        );
         if let Some(captures) = url_re.unwrap().captures(&content) {
             if let Some(title) = captures.get(1) {
                 let title = title.as_str().to_string();
@@ -76,7 +77,7 @@ pub fn handle_interactive(
                 }
             }
         } else {
-            println!("No match: {:?}", content);
+            println!("No url match: {:?}", content);
             return Skip;
         }
         let new_props = fill_properties(props, &add, &["template"]);
@@ -122,9 +123,8 @@ pub fn get_interactive_data(
 
     println!("Chose {choice}: {}", template_name);
     let content = util::apply_substitutions(&task.content);
-    let url_re =
-        Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)");
-    if let Some(captures) = url_re.unwrap().captures(&content) {
+    let url_re = url_re().unwrap();
+    if let Some(captures) = url_re.captures(&content) {
         let mut tags = vec![];
         let title = if let Some(title) = captures.get(1) {
             let title = title.as_str().to_string();
@@ -145,9 +145,16 @@ pub fn get_interactive_data(
             TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
         )
     } else {
-        println!("No match: {:?}", content);
+        println!("No url match: {:?} with {url_re:?}", content);
         (Skip, TaskData::Unhandled)
     }
+}
+
+fn url_re() -> Result<Regex> {
+    let url_re = Regex::new(
+        r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@&+,()\\{}]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)",
+    );
+    url_re.context("failed to construct url_re")
 }
 
 pub fn handle_interactive_data(
@@ -192,8 +199,7 @@ pub fn handle_interactive_data(
     println!("Chose {choice}: {}", template_name);
     if let ListElement(_, props) = comp.get_element_mut() {
         let content = util::apply_substitutions(&task.content);
-        let url_re =
-            Regex::new(r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)");
+        let url_re = url_re();
         if let Some(captures) = url_re.unwrap().captures(&content) {
             let mut tags = vec![];
             let title = if let Some(title) = captures.get(1) {
@@ -219,7 +225,7 @@ pub fn handle_interactive_data(
                 TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
             );
         } else {
-            println!("No match: {:?}", content);
+            println!("No match url: {:?}", content);
             return (Skip, TaskData::Unhandled);
         }
     }
