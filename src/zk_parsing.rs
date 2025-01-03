@@ -88,8 +88,6 @@ pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
 pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use ZkToken::*;
     let text = apply_substitutions(text);
-    println!("parsing start");
-    info!("info test");
     debug!("text after subsitutions: {text:?}");
 
     let mut lexer = ZkToken::lexer(&text);
