@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -76,8 +76,8 @@ enum Commands {
     },
     Test {},
     Todoi {
-        #[arg(required = true)]
-        graph_root: PathBuf,
+        #[arg(required = false)]
+        graph_root: Option<PathBuf>,
         #[arg(short, long, default_value_t = false)]
         complete_tasks: bool,
         #[arg(short, long, required = false)]
@@ -111,6 +111,17 @@ fn run() -> Result<()> {
             mode,
         }) => {
             let mode = mode.unwrap_or(TextMode::LogSeq);
+            let graph_root = if let Some(graph_root) = graph_root {
+                graph_root
+            } else if mode == TextMode::Zk {
+                if let Ok(notebook_dir) = std::env::var("ZK_NOTEBOOK_DIR") {
+                    PathBuf::from(notebook_dir)
+                } else {
+                    bail!("Could not determine zk notebook dir. Either specify it via the environment variable 'ZK_NOTEBOOK_DIR' or specify it directly!");
+                }
+            } else {
+                bail!("Could not determine graph root!");
+            };
             todoi::main(graph_root, complete_tasks, mode)?;
             Ok(())
         }

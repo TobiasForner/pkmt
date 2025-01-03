@@ -7,7 +7,7 @@ use crate::{
     obsidian_parsing::parse_obsidian_file, zk_parsing::parse_zk_file,
 };
 
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum TextMode {
     Obsidian,
     LogSeq,
