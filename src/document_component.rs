@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use tracing::{debug, instrument};
 
 use crate::{
-    parse::{parse_file, TextMode},
+    parse::{self, parse_file, TextMode},
     util::{self, ends_with_blank_line, files_in_tree, indent_level, starts_with_blank_line},
 };
 
@@ -260,6 +260,50 @@ pub enum MentionedFile {
     FilePath(PathBuf),
 }
 
+impl MentionedFile {
+    pub fn to_mode_text(&self, file_info: &Option<FileInfo>, mode: TextMode) -> String {
+        use MentionedFile::*;
+        use TextMode::*;
+        match mode {
+            LogSeq => {
+                let file_name = match self {
+                    FileName(name) => name,
+                    FilePath(file_path) => {
+                        if let Some(name) = file_path.file_name() {
+                            &name.to_string_lossy()
+                        } else {
+                            "___nothing.txt"
+                        }
+                    }
+                };
+                if let Some(file_info) = file_info {
+                    if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
+                        if let Some((name, ext)) = file_name.rsplit_once('.') {
+                            if ["png", "jpeg"].contains(&ext) {
+                                debug!("image: {file_name}: {file_info:?}");
+                                let dest_dir = dest_file.parent().unwrap();
+                                let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
+                                if let Some(rel) = rel {
+                                    return format!(
+                                        "![{name}.{ext}]({})",
+                                        rel.to_string_lossy().replace("\\", "/")
+                                    );
+                                } else {
+                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                format!("{{{{embed [[{file_name}]]}}}}")
+            }
+
+            other => todo!("not implemented: conversion of mentioned file to {other:?}"),
+        }
+    }
+}
+
 impl Display for MentionedFile {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         use MentionedFile::*;
@@ -275,26 +319,145 @@ impl Display for MentionedFile {
 pub struct Property {
     name: String,
     is_single: bool,
-    values: Vec<String>,
+    values: Vec<PropValue>,
 }
+
 impl Property {
-    pub fn new(name: String, is_single: bool, values: Vec<String>) -> Self {
+    pub fn to_mode_text(&self, mode: &TextMode, file_info: &Option<FileInfo>) -> String {
+        use TextMode::*;
+        let vals: Vec<String> = self
+            .values
+            .iter()
+            .map(|v| v.to_mode_text(mode, file_info))
+            .collect();
+        match mode {
+            LogSeq => {
+                let value = vals.join(", ");
+                format!("{}:: {value}", self.name)
+            }
+            Zk => {
+                let value = vals.join(", ");
+                if self.is_single {
+                    format!("{} ::= {value}", self.name)
+                } else {
+                    format!("{} ::= [{value}]", self.name)
+                }
+            }
+            Obsidian => {
+                todo!("not implemented: conversion of property to obsidian!")
+            }
+        }
+    }
+
+    fn to_zk_frontmatter_prop(&self, file_info: &Option<FileInfo>) -> String {
+        let vals: Vec<String> = self
+            .values
+            .iter()
+            .map(|v| v.to_mode_text(&TextMode::Zk, file_info))
+            .collect();
+        let value = vals.join(", ");
+        if self.is_single {
+            format!("{}: {value}", self.name)
+        } else {
+            format!("{}: [{value}]", self.name)
+        }
+    }
+
+    pub fn new(name: String, is_single: bool, values: Vec<PropValue>) -> Self {
         Self {
             name,
             is_single,
             values,
         }
     }
+
+    // created a new instance by parsing the passed values if possible
+    pub fn new_parse(
+        name: String,
+        is_single: bool,
+        values: &[String],
+        mode: TextMode,
+        file_dir: &Option<PathBuf>,
+    ) -> Self {
+        let values = values
+            .iter()
+            .map(|v| Property::try_prop_value_parse(v, &mode, file_dir))
+            .collect();
+        Self::new(name, is_single, values)
+    }
+
+    fn try_prop_value_parse(val: &str, mode: &TextMode, file_dir: &Option<PathBuf>) -> PropValue {
+        if let Ok(pd) = parse::parse_text(val, mode, file_dir) {
+            let comps = pd.components();
+            if let [comp] = &comps[..] {
+                if let DocumentElement::FileLink(mf, sec, rename) = &comp.element {
+                    return PropValue::FileLink(mf.clone(), sec.clone(), rename.clone());
+                }
+            }
+        }
+        PropValue::String(val.to_string())
+    }
+
     pub fn has_name(&self, name: &str) -> bool {
         self.name == name
     }
 
-    pub fn add_values(&mut self, values: &[String]) {
+    pub fn add_values(&mut self, values: &[String], mode: &TextMode, file_dir: &Option<PathBuf>) {
         values.iter().for_each(|v| {
-            if !self.values.contains(v) {
-                self.values.push(v.to_string());
+            let v = Property::try_prop_value_parse(v, mode, file_dir);
+            if !self.values.contains(&v) {
+                self.values.push(v);
             }
         });
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PropValue {
+    String(String),
+    FileLink(MentionedFile, Option<String>, Option<String>),
+}
+
+impl PropValue {
+    pub fn to_mode_text(&self, mode: &TextMode, file_info: &Option<FileInfo>) -> String {
+        use PropValue::*;
+        use TextMode::*;
+        match self {
+            String(s) => s.to_string(),
+            FileLink(mf, _section, rename) => match mode {
+                LogSeq => {
+                    // TODO: use section
+                    format!("[[{mf}]]")
+                }
+                Zk => match mf {
+                    MentionedFile::FilePath(p) => {
+                        let mut p = p.clone();
+                        if let Some(file_info) = file_info {
+                            if let Some(dest) = &file_info.destination_file {
+                                if let Some(parent) = dest.parent() {
+                                    let rel = pathdiff::diff_paths(&p, parent);
+                                    debug!("determined relative path {rel:?}");
+                                    if let Some(rel) = rel {
+                                        p = rel;
+                                    }
+                                }
+                            }
+                        }
+                        let p = p.as_os_str();
+                        let p = p.to_string_lossy();
+                        if let Some(name) = rename {
+                            format!("[{name}]({p})")
+                        } else {
+                            format!("[{p}]({p})")
+                        }
+                    }
+                    MentionedFile::FileName(_name) => todo!(),
+                },
+                other => {
+                    todo!("not implemented: conversion of PropValue to {other:?}")
+                }
+            },
+        }
     }
 }
 
@@ -332,10 +495,8 @@ impl DocumentElement {
             Properties(props) => {
                 let mut res = String::new();
                 props.iter().for_each(|p| {
-                    let value = p.values.join(", ");
-                    res.push_str(&p.name);
-                    res.push_str(":: ");
-                    res.push_str(&value);
+                    let p_text = p.to_mode_text(&TextMode::LogSeq, file_info);
+                    res.push_str(&p_text);
                 });
                 res
             }
@@ -484,6 +645,7 @@ impl DocumentElement {
             }
         }
     }
+
     #[instrument]
     fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
         use DocumentElement::*;
@@ -493,14 +655,9 @@ impl DocumentElement {
             Frontmatter(props) => {
                 let mut res = String::from("---");
                 props.iter().for_each(|p| {
-                    let vals = p.values.join(", ");
-                    let value = if p.is_single {
-                        vals
-                    } else {
-                        format!("[{vals}]")
-                    };
+                    let p_text = p.to_zk_frontmatter_prop(file_info);
                     res.push('\n');
-                    res.push_str(&format!("{}: {value}", p.name));
+                    res.push_str(&p_text);
                 });
                 res.push_str("\n---");
                 res
@@ -508,16 +665,11 @@ impl DocumentElement {
             Properties(props) => {
                 let mut res = String::from("");
                 props.iter().for_each(|p| {
-                    let vals = p.values.join(", ");
-                    let value = if p.is_single {
-                        vals
-                    } else {
-                        format!("[{vals}]")
-                    };
                     if !res.is_empty() {
                         res.push('\n');
                     }
-                    res.push_str(&format!("{}::= {value}", p.name));
+                    let p_text = p.to_mode_text(&TextMode::Zk, file_info);
+                    res.push_str(&p_text);
                 });
                 res
             }
@@ -635,9 +787,9 @@ impl DocumentElement {
                         .enumerate()
                         .for_each(|(index, (key, value))| {
                             let line = if value.is_empty() {
-                                format!("{key}::=")
+                                format!("{key} ::=")
                             } else {
-                                format!("{key}::= {value}")
+                                format!("{key} ::= {value}")
                             };
                             if index > 0 {
                                 res.push_str("\n  ");

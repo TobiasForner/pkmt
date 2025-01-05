@@ -155,7 +155,12 @@ impl ZkHandler {
     }
 
     #[instrument()]
-    fn add_to_zk_pd(&self, pd: &mut ParsedDocument, task_data: &TaskData) -> bool {
+    fn add_to_zk_pd(
+        &self,
+        pd: &mut ParsedDocument,
+        task_data: &TaskData,
+        file_dir: &Option<PathBuf>,
+    ) -> bool {
         let frontmatter = pd.get_document_component_mut(&|dc| {
             let elem = dc.get_element();
             matches!(elem, DocumentElement::Frontmatter(_))
@@ -171,7 +176,7 @@ impl ZkHandler {
             if let DocumentElement::Frontmatter(properties) = dc.get_element_mut() {
                 for p in properties {
                     if p.has_name("tags") {
-                        p.add_values(&tags_to_add);
+                        p.add_values(&tags_to_add, &TextMode::Zk, file_dir);
                     }
                 }
                 true
@@ -184,19 +189,19 @@ impl ZkHandler {
         if tags_success {
             match task_data {
                 TaskData::Sbs(url, author, _, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()]);
+                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
                     if let Some(author) = author {
-                        self.fill_property(pd, "author", &[author.to_string()]);
+                        self.fill_property(pd, "author", &[author.to_string()], file_dir);
                     }
                 }
                 TaskData::Youtube(url, title, channel, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()]);
-                    self.fill_property(pd, "channel", &[channel.to_string()]);
-                    self.fill_property(pd, "description", &[title.to_string()]);
+                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
+                    self.fill_property(pd, "description", &[title.to_string()], file_dir);
                 }
                 TaskData::YtPlaylist(url, channel, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()]);
-                    self.fill_property(pd, "channel", &[channel.to_string()]);
+                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
                 }
                 TaskData::Unhandled => {
                     return false;
@@ -204,7 +209,7 @@ impl ZkHandler {
                 TaskData::Interactive(_, url, _, _) => {
                     if let Some(url) = url {
                         debug!("filled in url");
-                        self.fill_property(pd, "url", &[url.to_string()]);
+                        self.fill_property(pd, "url", &[url.to_string()], file_dir);
                     }
                 }
             }
@@ -230,7 +235,13 @@ impl ZkHandler {
     }
 
     #[instrument]
-    fn fill_property(&self, pd: &mut ParsedDocument, prop_name: &str, values: &[String]) {
+    fn fill_property(
+        &self,
+        pd: &mut ParsedDocument,
+        prop_name: &str,
+        values: &[String],
+        file_dir: &Option<PathBuf>,
+    ) {
         let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
             DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
@@ -239,7 +250,7 @@ impl ZkHandler {
             if let DocumentElement::Properties(props) = prop.get_element_mut() {
                 props.iter_mut().for_each(|p| {
                     if p.has_name(prop_name) {
-                        p.add_values(values);
+                        p.add_values(values, &TextMode::Zk, file_dir);
                     }
                 });
             }
@@ -274,7 +285,7 @@ impl TaskDataHandler for ZkHandler {
         let pd = zk_parsing::parse_zk_file(&zk_file);
         debug!("{pd:?}");
         let mut pd = pd?;
-        let success = self.add_to_zk_pd(&mut pd, task_data);
+        let success = self.add_to_zk_pd(&mut pd, task_data, &Some(zk_file.clone()));
         if success {
             let file_info = FileInfo::try_new(zk_file.clone(), Some(zk_file.clone()), None, None)?;
             let text = pd.to_zk_text(&Some(file_info));
@@ -990,7 +1001,7 @@ tags: [video, youtube, inbox]
         "test_channel".to_string(),
         vec!["tag1".to_string(), "tag2".to_string()],
     );
-    let _ = zk_handler.add_to_zk_pd(&mut pd, &task_data);
+    let _ = zk_handler.add_to_zk_pd(&mut pd, &task_data, &None);
     let res = pd.to_zk_text(&None);
     let expected = "---
 date: 2024-12-31 01:09:55
@@ -998,8 +1009,8 @@ tags: [video, youtube, inbox, tag1, tag2]
 ---
 
 # title
-- channel::= test_channel
-- description::= title
-- url::= url";
+- channel ::= test_channel
+- description ::= title
+- url ::= url";
     assert_eq!(res, expected);
 }
