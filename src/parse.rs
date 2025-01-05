@@ -3,8 +3,10 @@ use clap::{builder::PossibleValue, ValueEnum};
 use std::path::PathBuf;
 
 use crate::{
-    document_component::ParsedDocument, logseq_parsing::parse_logseq_file,
-    obsidian_parsing::parse_obsidian_file, zk_parsing::parse_zk_file,
+    document_component::ParsedDocument,
+    logseq_parsing::{parse_logseq_file, parse_logseq_text},
+    obsidian_parsing::{parse_obsidian_file, parse_obsidian_text},
+    zk_parsing::{parse_zk_file, parse_zk_text},
 };
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -27,6 +29,18 @@ impl ValueEnum for TextMode {
             LogSeq => PossibleValue::new("logseq"),
             Zk => PossibleValue::new("zk"),
         })
+    }
+}
+pub fn parse_text(
+    text: &str,
+    mode: &TextMode,
+    file_dir: &Option<PathBuf>,
+) -> Result<ParsedDocument> {
+    use TextMode::*;
+    match mode {
+        Obsidian => parse_obsidian_text(text, file_dir),
+        LogSeq => parse_logseq_text(text, file_dir),
+        Zk => parse_zk_text(text, file_dir),
     }
 }
 

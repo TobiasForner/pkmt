@@ -7,11 +7,11 @@ use std::{
 use test_log::test;
 
 use crate::{
-    document_component::Property,
+    document_component::{PropValue, Property},
     util::{apply_substitutions, indent_level, trim_like_first_line_plus},
 };
 use anyhow::{bail, Context, Result};
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 use crate::document_component::{
     collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
@@ -36,9 +36,9 @@ enum ZkToken {
     OpenDoubleBraces,
     #[token("]]")]
     ClosingDoubleBraces,
-    #[regex("[ \t]+")]
+    #[regex(r"[ \t]")]
     Space,
-    #[regex("\n\r?")]
+    #[regex("\n")]
     Newline,
     #[regex("\r")]
     CarriageReturn,
@@ -55,10 +55,14 @@ enum ZkToken {
     ListStart,
     #[token("---")]
     FrontmatterDelim,
-    #[regex(r"[a-zA-Z_]+\s*::=[ \t]*[a-zA-Z_]*")]
+    /*#[regex(r"[a-zA-Z_]+\s*::=[ \t]*[a-zA-Z_]*")]
     SingleProperty,
-    #[regex(r"[a-zA-Z_]+\s*::=[ \t]\[(([a-zA-Z_]\s*,\s*)*[a-zA-Z_])?\]")]
-    MultiProperty,
+    //#[regex(r"
+    #[regex(r"[a-zA-Z_]+\s*::=[ \t]*\[(([a-zA-Z_]*\s*,\s*)*[a-zA-Z_]*)?\]")]
+    MultiProperty,*/
+    // the pipes are a workaround for a known bug with * in regex patterns, see e.g. https://github.com/maciejhirsz/logos/issues/456
+    #[regex(r"[a-zA-Z_]+(\s|\s\s|\s\s\s|)::=\s*")]
+    PropertyStart,
     #[regex("[.{}^$><,0-9():=*&/;'+!?\"%]+")]
     MiscText,
     #[token("\\")]
@@ -117,7 +121,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         }
                         blank_line = false;
                     }
-                    SingleProperty => {
+                    /*SingleProperty => {
                         let sp = parse_single_property(&lexer)?;
                         let sp = DocumentElement::Properties(vec![sp]);
                         res.push(DocumentComponent::new(sp));
@@ -128,6 +132,18 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         let mp = DocumentElement::Properties(vec![mp]);
                         res.push(DocumentComponent::new(mp));
                         blank_line = false;
+                    }*/
+                    PropertyStart => {
+                        if blank_line {
+                            debug!("found property start: {lexer:?}");
+                            let name = lexer.slice().trim().trim_end_matches("::=").trim();
+                            let prop = parse_property(&mut lexer, name.to_string(), file_dir)?;
+                            res.push(DocumentComponent::new(DocumentElement::Properties(vec![
+                                prop,
+                            ])));
+                        } else {
+                            res.push(DocumentComponent::new_text(lexer.slice()));
+                        }
                     }
                     SingleHash => {
                         if blank_line {
@@ -198,20 +214,16 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                     }
                     ListStart => {
                         if blank_line {
-                            if let Ok(le) = parse_list_element(&mut lexer, indent_spaces, file_dir)
-                            {
-                                let mut comps = le.into_components();
-                                res.append(&mut comps);
-                            } else {
-                                panic!("Could not parse list element!");
-                            }
+                            let le = parse_list_element(&mut lexer, indent_spaces, file_dir)?;
+                            let mut comps = le.into_components();
+                            res.append(&mut comps);
                             blank_line = true;
                         } else {
                             res.push(DocumentComponent::new_text("- "));
                         }
                     }
                     FrontmatterDelim => {
-                        let fm = parse_frontmatter(&mut lexer)?;
+                        let fm = parse_frontmatter(&mut lexer, file_dir)?;
                         res.push(fm);
                     }
                     _ => todo!("Support missing token types: {token:?}"),
@@ -225,24 +237,131 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let res = collapse_text(&res);
     Ok(ParsedDocument::ParsedText(res))
 }
-fn parse_single_property(lexer: &Lexer<'_, ZkToken>) -> Result<Property> {
+
+#[instrument]
+fn parse_property(
+    lexer: &mut Lexer<'_, ZkToken>,
+    name: String,
+    file_dir: &Option<PathBuf>,
+) -> Result<Property> {
+    use ZkToken::*;
+    let mut prop_val_text = String::new();
+    while let Some(result) = lexer.next() {
+        debug!("got {result:?} for {:?}", lexer.slice());
+        let token = match result {
+            Err(_) => bail!(
+                "Failed to parse heading! {result:?}; {}",
+                construct_error_details(lexer)
+            ),
+            Ok(token) => token,
+        };
+        match token {
+            Newline => {
+                break;
+            }
+            other => {
+                let txt = lexer.slice();
+                if txt.ends_with('\n') {
+                    prop_val_text.push_str(txt.trim_end());
+                    break;
+                } else if txt.contains('\n') {
+                    bail!("parse property: encountered newline in the middle of slice {txt:?} for token {other:?}!")
+                } else {
+                    prop_val_text.push_str(txt);
+                }
+            }
+        }
+    }
+    debug!("found property value text: {prop_val_text:?}");
+    let prop_val_text = prop_val_text.trim();
+    if prop_val_text.is_empty() {
+        return Ok(Property::new(name, true, vec![]));
+    } else if prop_val_text.starts_with('[') && prop_val_text.ends_with(']') {
+        // TODO: check that brackets form a pair
+        // multi property
+        let prop_vals_text = &prop_val_text[1..prop_val_text.len().saturating_sub(1)];
+        // split at commas that are not within paranthesis
+        let mut values = vec![];
+        let mut parenthesis_stack = vec![];
+        let mut current = String::new();
+        prop_vals_text.chars().for_each(|c| {
+            if c == '(' {
+                parenthesis_stack.push(')');
+            } else if c == '[' {
+                parenthesis_stack.push(']');
+            } else if c == '{' {
+                parenthesis_stack.push('}');
+            } else if c == ',' {
+                values.push(current.clone());
+                current = String::new();
+            } else if let Some(ch) = parenthesis_stack.last() {
+                if *ch == c {
+                    parenthesis_stack.pop();
+                } else {
+                    current.push(c);
+                }
+            } else {
+                current.push(c);
+            }
+        });
+        if !current.is_empty() {
+            values.push(current);
+        }
+
+        return Ok(Property::new_parse(
+            name,
+            false,
+            &values,
+            crate::parse::TextMode::Zk,
+            file_dir,
+        ));
+    } else {
+        return Ok(Property::new_parse(
+            name,
+            true,
+            &vec![prop_val_text.to_string()],
+            crate::parse::TextMode::Zk,
+            file_dir,
+        ));
+    }
+}
+
+fn parse_single_property(
+    lexer: &Lexer<'_, ZkToken>,
+    file_dir: &Option<PathBuf>,
+) -> Result<Property> {
     let parts = lexer
         .slice()
         .split_once("::=")
         .context("Single property must contain '::='!")?;
     let prop_name = parts.0.trim();
     let prop_value = parse_prop_values(parts.1).0;
-    Ok(Property::new(prop_name.to_string(), true, prop_value))
+    Ok(Property::new_parse(
+        prop_name.to_string(),
+        true,
+        &prop_value,
+        crate::parse::TextMode::Zk,
+        file_dir,
+    ))
 }
 
-fn parse_multi_property(lexer: &Lexer<'_, ZkToken>) -> Result<Property> {
+fn parse_multi_property(
+    lexer: &Lexer<'_, ZkToken>,
+    file_dir: &Option<PathBuf>,
+) -> Result<Property> {
     let parts = lexer
         .slice()
         .split_once("::=")
         .context("Single property must contain '::='!")?;
     let prop_name = parts.0.trim();
     let prop_values = parse_prop_values(parts.1).0;
-    Ok(Property::new(prop_name.to_string(), false, prop_values))
+    Ok(Property::new_parse(
+        prop_name.to_string(),
+        false,
+        &prop_values,
+        crate::parse::TextMode::Zk,
+        file_dir,
+    ))
 }
 
 // returns vec<values>, is_multi_property (in brackets)
@@ -264,7 +383,10 @@ fn parse_prop_values(text: &str) -> (Vec<String>, bool) {
 }
 
 #[instrument]
-fn parse_frontmatter(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentComponent> {
+fn parse_frontmatter(
+    lexer: &mut Lexer<'_, ZkToken>,
+    file_dir: &Option<PathBuf>,
+) -> Result<DocumentComponent> {
     use ZkToken::*;
     let mut text = String::new();
     while let Some(result) = lexer.next() {
@@ -288,7 +410,13 @@ fn parse_frontmatter(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentComponent
                             .context("frontmatter lines need to contain a colon, got {l:?}")?;
                         let name = parts.0.trim();
                         let (vals, is_multi) = parse_prop_values(parts.1);
-                        props.push(Property::new(name.to_string(), !is_multi, vals));
+                        props.push(Property::new_parse(
+                            name.to_string(),
+                            !is_multi,
+                            &vals,
+                            crate::parse::TextMode::Zk,
+                            file_dir,
+                        ));
                         Ok(())
                     };
                     tmp
@@ -308,9 +436,13 @@ fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
     let start = lexer.span().start;
     let text = lexer.source();
     let line = text[0..start].lines().count();
-    format!("Encountered '{slice}' at {:?} (line {line});", lexer.span())
+    format!(
+        "Encountered '{slice}' at {:?} (line {line}); {lexer:?}",
+        lexer.span()
+    )
 }
 
+#[instrument]
 fn parse_list_element(
     lexer: &mut Lexer<'_, ZkToken>,
     initial_indent_spaces: usize,
@@ -320,8 +452,20 @@ fn parse_list_element(
     let mut last_was_blank = false;
     let mut blank_line = false;
     let mut text = " ".repeat(initial_indent_spaces);
-    while let Some(Ok(token)) = lexer.next() {
-        text.push_str(lexer.slice());
+    while let Some(token) = lexer.next() {
+        let token = match token {
+            Ok(token) => token,
+            Err(_) => bail!(
+                "list element parsing failed: {}",
+                construct_error_details(lexer)
+            ),
+        };
+        let slice = lexer.slice();
+        debug!(
+            "token: {token:?} for {slice:?}; is blank={}; last: {last_was_blank}",
+            token.is_blank()
+        );
+        text.push_str(slice);
         if !token.is_blank() {
             blank_line = false;
         }
@@ -330,9 +474,11 @@ fn parse_list_element(
             blank_line = true;
         }
         if blank_line && last_was_blank {
+            debug!("finishing list text search");
             break;
         }
     }
+    debug!("list text: {text:?}");
     let mut list_components = vec![];
     let mut current = String::new();
     let mut current_indent = 0;
@@ -367,6 +513,7 @@ fn parse_list_element(
     Ok(ParsedDocument::ParsedText(components))
 }
 
+#[instrument]
 fn assemble_blocks_rec(
     pos: usize,
     block_texts_indent: &[(String, usize)],
@@ -389,6 +536,7 @@ fn assemble_blocks_rec(
     ))
 }
 
+#[instrument]
 fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<DocumentElement> {
     let text = text.trim().replacen("- ", "", 1);
     let pd = parse_zk_text(&text, file_dir)?;
@@ -416,10 +564,20 @@ fn parse_heading(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentElement> {
     while let Some(result) = lexer.next() {
         debug!("got {result:?} for {:?}", lexer.slice());
         let token = match result {
-            Err(_) => bail!(
-                "Failed to parse heading! {result:?}; {}",
-                construct_error_details(lexer)
-            ),
+            Err(_) => {
+                let slice = lexer.slice();
+                if slice.ends_with('\n') {
+                    text.push_str(slice.trim_end());
+                    let res = Ok(DocumentElement::Heading(level, text));
+                    debug!("result: {res:?}");
+                    return res;
+                }
+
+                bail!(
+                    "Failed to parse heading! {result:?}; {}",
+                    construct_error_details(lexer)
+                )
+            }
             Ok(token) => token,
         };
         match token {
@@ -495,7 +653,7 @@ fn parse_adnote(
         }
     }
     bail!(
-        "Failed to parse adnote: Could not match '{}' at positions {:?}",
+        "Failed to parse adnote: Could not match '{:?}' at positions {:?}",
         lexer.slice(),
         lexer.span()
     )
@@ -697,11 +855,15 @@ tags: [video, youtube]
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
-        assert_eq!(text.replace("    ", "\t").trim(), res);
+        assert_eq!(
+            text.replace("    ", "\t").replace("::=", " ::=").trim(),
+            res
+        );
     } else {
         panic!("Error: {res:?}");
     }
 }
+
 #[test]
 fn test_curly_braces() {
     let text = "{{blabla}}";
@@ -710,6 +872,88 @@ fn test_curly_braces() {
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
         assert_eq!(text.replace("    ", "\t"), res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_multi_property() {
+    let text = "property::= [test]";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "property".to_string(),
+        false,
+        vec![PropValue::String("test".to_string())],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        assert_eq!("property ::= [test]", res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_multi_property_empty() {
+    let text = "property::= []";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "property".to_string(),
+        false,
+        vec![],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        let expected = "property ::= []";
+        assert_eq!(expected, res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_multi_property_single_char() {
+    let text = "p ::= [a]";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "p".to_string(),
+        false,
+        vec![PropValue::String("a".to_string())],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        assert_eq!(text.replace("    ", "\t"), res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_single_property_file_link() {
+    let text = "property::= [test](../test.md)";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "property".to_string(),
+        true,
+        vec![PropValue::String("[test](../test.md)".to_string())],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        let expected = "property ::= [test](../test.md)";
+        assert_eq!(expected, res);
     } else {
         panic!("Error: {res:?}");
     }
