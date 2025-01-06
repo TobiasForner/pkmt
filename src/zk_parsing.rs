@@ -7,7 +7,7 @@ use std::{
 use test_log::test;
 
 use crate::{
-    document_component::{PropValue, Property},
+    document_component::Property,
     util::{apply_substitutions, indent_level, trim_like_first_line_plus},
 };
 use anyhow::{bail, Context, Result};
@@ -98,6 +98,8 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let mut res = vec![];
     let mut blank_line = true;
     let indent_spaces = 0;
+    // opening [ is not included as this is only run right after encountering [
+    let file_link_re = regex::Regex::new(r"([-a-zäöüA-ZÄÖÜ_ /\.]+)\]\(([-a-zA-Z_/\.]+)\)")?;
 
     while let Some(result) = lexer.next() {
         debug!(
@@ -183,7 +185,38 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         blank_line = false;
                     }
                     Bracket => {
-                        res.push(DocumentComponent::new_text("["));
+                        // check whether this is a file link
+                        let remaining = lexer.remainder();
+                        debug!("checking for file link: remaining: {remaining:?}");
+                        if let Some(c) = file_link_re.captures(remaining) {
+                            debug!("file link match!");
+                            let name = c.get(1).map(|name| name.as_str().to_string());
+                            let Some(path) = c.get(2) else { panic!("") };
+                            let file_link = DocumentElement::FileLink(
+                                MentionedFile::FilePath(PathBuf::from(path.as_str())),
+                                None,
+                                name,
+                            );
+                            let file_link = DocumentComponent::new(file_link);
+                            res.push(file_link);
+
+                            // consume tokens from the lexer until we have consumed the first
+                            // closing paranthesis
+                            while let Some(token) = lexer.next() {
+                                if token.is_err() {
+                                    bail!("Failed to consume tokens corresponding to file link. Encountered {:?}", construct_error_details(&lexer))
+                                };
+                                let slice = lexer.slice();
+                                if slice.ends_with(')') {
+                                    break;
+                                } else if slice.contains(')') {
+                                    panic!("No slice should contain ')' ")
+                                }
+                            }
+                        } else {
+                            debug!("no file link match!");
+                            res.push(DocumentComponent::new_text("["));
+                        }
                         blank_line = false;
                     }
                     ClosingBracket => {
@@ -250,7 +283,7 @@ fn parse_property(
         debug!("got {result:?} for {:?}", lexer.slice());
         let token = match result {
             Err(_) => bail!(
-                "Failed to parse heading! {result:?}; {}",
+                "Failed to parse property! {result:?}; {}",
                 construct_error_details(lexer)
             ),
             Ok(token) => token,
@@ -285,23 +318,22 @@ fn parse_property(
         let mut parenthesis_stack = vec![];
         let mut current = String::new();
         prop_vals_text.chars().for_each(|c| {
-            if c == '(' {
-                parenthesis_stack.push(')');
-            } else if c == '[' {
-                parenthesis_stack.push(']');
-            } else if c == '{' {
-                parenthesis_stack.push('}');
-            } else if c == ',' {
+            if c == ',' {
                 values.push(current.clone());
                 current = String::new();
-            } else if let Some(ch) = parenthesis_stack.last() {
-                if *ch == c {
-                    parenthesis_stack.pop();
-                } else {
-                    current.push(c);
-                }
             } else {
                 current.push(c);
+                if c == '(' {
+                    parenthesis_stack.push(')');
+                } else if c == '[' {
+                    parenthesis_stack.push(']');
+                } else if c == '{' {
+                    parenthesis_stack.push('}');
+                } else if let Some(ch) = parenthesis_stack.last() {
+                    if *ch == c {
+                        parenthesis_stack.pop();
+                    }
+                }
             }
         });
         if !current.is_empty() {
@@ -319,7 +351,7 @@ fn parse_property(
         return Ok(Property::new_parse(
             name,
             true,
-            &vec![prop_val_text.to_string()],
+            &[prop_val_text.to_string()],
             crate::parse::TextMode::Zk,
             file_dir,
         ));
@@ -879,6 +911,7 @@ fn test_curly_braces() {
 
 #[test]
 fn test_multi_property() {
+    use crate::document_component::PropValue;
     let text = "property::= [test]";
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
@@ -920,6 +953,7 @@ fn test_multi_property_empty() {
 
 #[test]
 fn test_multi_property_single_char() {
+    use crate::document_component::PropValue;
     let text = "p ::= [a]";
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
@@ -940,12 +974,17 @@ fn test_multi_property_single_char() {
 
 #[test]
 fn test_single_property_file_link() {
+    use crate::document_component::PropValue;
     let text = "property::= [test](../test.md)";
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
         "property".to_string(),
         true,
-        vec![PropValue::String("[test](../test.md)".to_string())],
+        vec![PropValue::FileLink(
+            MentionedFile::FilePath(PathBuf::from("../test.md")),
+            None,
+            Some("test".to_string()),
+        )],
     )]));
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
@@ -953,6 +992,32 @@ fn test_single_property_file_link() {
         assert_eq!(pd, expected);
         let res = pd.to_zk_text(&None);
         let expected = "property ::= [test](../test.md)";
+        assert_eq!(expected, res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_multi_property_file_link() {
+    use crate::document_component::PropValue;
+    let text = "property::= [[test](../test.md)]";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "property".to_string(),
+        false,
+        vec![PropValue::FileLink(
+            MentionedFile::FilePath(PathBuf::from("../test.md")),
+            None,
+            Some("test".to_string()),
+        )],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        let expected = "property ::= [[test](../test.md)]";
         assert_eq!(expected, res);
     } else {
         panic!("Error: {res:?}");
