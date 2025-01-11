@@ -3,6 +3,7 @@ mod interactive;
 mod todoist_api;
 mod youtube_details;
 use std::{
+    collections::HashMap,
     fmt::Debug,
     fs::{DirEntry, FileType, ReadDir},
     path::{Path, PathBuf},
@@ -18,7 +19,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     document_component::{
-        DocumentComponent, DocumentElement, FileInfo, MentionedFile, ParsedDocument,
+        DocumentComponent, DocumentElement, FileInfo, MentionedFile, ParsedDocument, PropValue,
     },
     logseq_parsing::parse_logseq_file,
     parse::{parse_file, TextMode},
@@ -129,6 +130,44 @@ impl ZkHandler {
     fn new(root_dir: PathBuf) -> Self {
         Self { root_dir }
     }
+
+    #[instrument]
+    fn get_zk_creator_file(&self, name: &str) -> Result<PathBuf> {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let data_dir = base_dirs.data_dir().join("pkmt");
+            if !data_dir.exists() {
+                std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
+            }
+
+            let lookup_path = data_dir.join("creator_lookup.toml");
+            let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
+                let text = std::fs::read_to_string(&lookup_path)?;
+                toml::from_str(&text)?
+            } else {
+                HashMap::new()
+            };
+            if let Some(path) = lookup.get(name) {
+                println!("{name:?}: found {path:?}");
+                Ok(path.to_path_buf())
+            } else {
+                let template_file = self
+                    .root_dir
+                    .join(".zk")
+                    .join("templates")
+                    .join("creator.md");
+                let file = ZkHandler::get_zk_file(name, template_file)?;
+                println!("{name:?}: found {file:?}");
+                lookup.insert(name.to_string(), file.clone());
+                let text = toml::to_string(&lookup)?;
+                let res = std::fs::write(&lookup_path, text);
+                println!("lookup write success{file:?}: {res:?}");
+                Ok(file)
+            }
+        } else {
+            bail!("Could not create basedirs!")
+        }
+    }
+
     #[instrument]
     fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
         use std::process::Command;
@@ -154,6 +193,27 @@ impl ZkHandler {
         Ok(PathBuf::from_str(p)?)
     }
 
+    fn fill_in_creator(
+        &self,
+        pd: &mut ParsedDocument,
+        author: &str,
+        prop_name: &str,
+        file_dir: &Option<PathBuf>,
+    ) -> Result<bool> {
+        let file = self.get_zk_creator_file(author)?;
+        self.fill_props(
+            pd,
+            prop_name,
+            &[PropValue::FileLink(
+                MentionedFile::FilePath(file),
+                None,
+                Some(author.to_string()),
+            )],
+            file_dir,
+        );
+        Ok(true)
+    }
+
     #[instrument()]
     fn add_to_zk_pd(
         &self,
@@ -176,7 +236,7 @@ impl ZkHandler {
             if let DocumentElement::Frontmatter(properties) = dc.get_element_mut() {
                 for p in properties {
                     if p.has_name("tags") {
-                        p.add_values(&tags_to_add, &TextMode::Zk, file_dir);
+                        p.add_values_parse(&tags_to_add, &TextMode::Zk, file_dir);
                     }
                 }
                 true
@@ -191,17 +251,31 @@ impl ZkHandler {
                 TaskData::Sbs(url, author, _, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
                     if let Some(author) = author {
-                        self.fill_property(pd, "author", &[author.to_string()], file_dir);
+                        let success = self.fill_in_creator(pd, author, "source", file_dir);
+                        if success.is_err() {
+                            return false;
+                        }
+                        //self.fill_property(pd, "author", &[author.to_string()], file_dir);
                     }
                 }
                 TaskData::Youtube(url, title, channel, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
-                    self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
+                    //self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
+                    let success = self.fill_in_creator(pd, channel, "channel", file_dir);
+                    if success.is_err() {
+                        println!("Could not fill in creator for {url:?}: {success:?}");
+                        return false;
+                    }
+                    println!("{}", pd.to_zk_text(&None));
                     self.fill_property(pd, "description", &[title.to_string()], file_dir);
                 }
                 TaskData::YtPlaylist(url, channel, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
-                    self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
+                    //self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
+                    let success = self.fill_in_creator(pd, channel, "channel", file_dir);
+                    if success.is_err() {
+                        return false;
+                    }
                 }
                 TaskData::Unhandled => {
                     return false;
@@ -250,7 +324,30 @@ impl ZkHandler {
             if let DocumentElement::Properties(props) = prop.get_element_mut() {
                 props.iter_mut().for_each(|p| {
                     if p.has_name(prop_name) {
-                        p.add_values(values, &TextMode::Zk, file_dir);
+                        p.add_values_parse(values, &TextMode::Zk, file_dir);
+                    }
+                });
+            }
+        }
+    }
+
+    #[instrument]
+    fn fill_props(
+        &self,
+        pd: &mut ParsedDocument,
+        prop_name: &str,
+        values: &[PropValue],
+        file_dir: &Option<PathBuf>,
+    ) {
+        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
+            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+            _ => false,
+        });
+        if let Some(prop) = property {
+            if let DocumentElement::Properties(props) = prop.get_element_mut() {
+                props.iter_mut().for_each(|p| {
+                    if p.has_name(prop_name) {
+                        p.add_values(values);
                     }
                 });
             }

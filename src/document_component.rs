@@ -402,7 +402,19 @@ impl Property {
         self.name == name
     }
 
-    pub fn add_values(&mut self, values: &[String], mode: &TextMode, file_dir: &Option<PathBuf>) {
+    pub fn add_values(&mut self, values: &[PropValue]) {
+        values.iter().for_each(|v| {
+            if !self.values.contains(&v) {
+                self.values.push(v.clone());
+            }
+        });
+    }
+    pub fn add_values_parse(
+        &mut self,
+        values: &[String],
+        mode: &TextMode,
+        file_dir: &Option<PathBuf>,
+    ) {
         values.iter().for_each(|v| {
             let v = Property::try_prop_value_parse(v, mode, file_dir);
             if !self.values.contains(&v) {
@@ -415,6 +427,7 @@ impl Property {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PropValue {
     String(String),
+    // mentioned_file, optional section, optional rename
     FileLink(MentionedFile, Option<String>, Option<String>),
 }
 
