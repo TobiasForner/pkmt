@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
+use todoi::ZkHandler;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 extern crate tracing;
 
@@ -82,6 +83,16 @@ enum Commands {
         complete_tasks: bool,
         #[arg(short, long, required = false)]
         mode: Option<TextMode>,
+    },
+    Creator {
+        #[arg(required = true)]
+        root_dir: PathBuf,
+        #[arg(required = true)]
+        name: String,
+        #[arg(short, long, required = false)]
+        mode: Option<TextMode>,
+        #[arg(short, long, required = false)]
+        relative: Option<PathBuf>,
     },
 }
 
@@ -208,6 +219,30 @@ fn run() -> Result<()> {
                 })?;
             }
             Ok(())
+        }
+        Some(Commands::Creator {
+            root_dir,
+            name,
+            mode,
+            relative,
+        }) => {
+            let mode = mode.unwrap_or(TextMode::Zk);
+            match mode {
+                TextMode::Zk => {
+                    let handler = ZkHandler::new(root_dir);
+                    let mut file = handler.get_zk_creator_file(&name)?;
+                    if let Some(relative) = relative {
+                        if let Some(rel) = relative.parent() {
+                            if let Some(rel) = pathdiff::diff_paths(&file, rel) {
+                                file = rel.to_path_buf();
+                            }
+                        }
+                    }
+                    println!("{}", file.to_string_lossy());
+                    Ok(())
+                }
+                _ => todo!("to implement: retrieve creator file for {mode:?}"),
+            }
         }
         None => panic!("Failed to parse arguments!"),
     };

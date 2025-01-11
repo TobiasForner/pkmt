@@ -123,16 +123,17 @@ fn add_to_zk(
 }
 
 #[derive(Debug)]
-struct ZkHandler {
+pub struct ZkHandler {
     root_dir: PathBuf,
 }
+
 impl ZkHandler {
-    fn new(root_dir: PathBuf) -> Self {
+    pub fn new(root_dir: PathBuf) -> Self {
         Self { root_dir }
     }
 
     #[instrument]
-    fn get_zk_creator_file(&self, name: &str) -> Result<PathBuf> {
+    pub fn get_zk_creator_file(&self, name: &str) -> Result<PathBuf> {
         if let Some(base_dirs) = directories::BaseDirs::new() {
             let data_dir = base_dirs.data_dir().join("pkmt");
             if !data_dir.exists() {
@@ -147,7 +148,7 @@ impl ZkHandler {
                 HashMap::new()
             };
             if let Some(path) = lookup.get(name) {
-                println!("{name:?}: found {path:?}");
+                debug!("{name:?}: found creator file in lookup: {path:?}");
                 Ok(path.to_path_buf())
             } else {
                 let template_file = self
@@ -156,11 +157,10 @@ impl ZkHandler {
                     .join("templates")
                     .join("creator.md");
                 let file = ZkHandler::get_zk_file(name, template_file)?;
-                println!("{name:?}: found {file:?}");
+                debug!("{name:?}: created new creator file: {file:?}");
                 lookup.insert(name.to_string(), file.clone());
                 let text = toml::to_string(&lookup)?;
                 let res = std::fs::write(&lookup_path, text);
-                println!("lookup write success{file:?}: {res:?}");
                 Ok(file)
             }
         } else {
@@ -266,7 +266,6 @@ impl ZkHandler {
                         println!("Could not fill in creator for {url:?}: {success:?}");
                         return false;
                     }
-                    println!("{}", pd.to_zk_text(&None));
                     self.fill_property(pd, "description", &[title.to_string()], file_dir);
                 }
                 TaskData::YtPlaylist(url, channel, _) => {

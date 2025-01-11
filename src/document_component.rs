@@ -404,7 +404,7 @@ impl Property {
 
     pub fn add_values(&mut self, values: &[PropValue]) {
         values.iter().for_each(|v| {
-            if !self.values.contains(&v) {
+            if !self.values.contains(v) {
                 self.values.push(v.clone());
             }
         });
