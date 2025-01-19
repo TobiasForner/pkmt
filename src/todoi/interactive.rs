@@ -57,10 +57,9 @@ pub fn handle_interactive(
     if let ListElement(_, props) = comp.get_element_mut() {
         let mut add = vec![];
         let content = util::apply_substitutions(&task.content);
-        let url_re = Regex::new(
-            r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@,]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)",
-        );
-        if let Some(captures) = url_re.unwrap().captures(&content) {
+
+        let url_re = url_re().unwrap();
+        if let Some(captures) = url_re.captures(&content) {
             if let Some(title) = captures.get(1) {
                 let title = title.as_str().to_string();
                 let tags = config.get_keyword_tags(&title);
@@ -152,7 +151,7 @@ pub fn get_interactive_data(
 
 fn url_re() -> Result<Regex> {
     let url_re = Regex::new(
-        r"\[([\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@&+,()\\{}]+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)",
+        r"\[((?:[\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@&+,()\\{}]|[^\u0000-\u007F])+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=]+)\)",
     );
     url_re.context("failed to construct url_re")
 }
