@@ -7,7 +7,7 @@ use tracing::{debug, instrument};
 pub const SPACES_PER_INDENT: usize = 4;
 
 pub fn apply_substitutions(text: &str) -> String {
-    text.replace('−', "-")
+    text.replace(['−', '—'], "-")
         .replace('∗', "*")
         .replace('∈', "\\in ")
         .replace("“", "\"")

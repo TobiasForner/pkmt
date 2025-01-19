@@ -49,7 +49,7 @@ enum ZkToken {
     #[token("]")]
     ClosingBracket,
     // Or regular expressions.
-    #[regex("[-a-zäöüA-ZÄÖÜ_]+")]
+    #[regex("[-a-z_A-Z]+")]
     Name,
     #[token("- ")]
     ListStart,
@@ -63,10 +63,14 @@ enum ZkToken {
     // the pipes are a workaround for a known bug with * in regex patterns, see e.g. https://github.com/maciejhirsz/logos/issues/456
     #[regex(r"[a-zA-Z_]+(\s|\s\s|\s\s\s|)::=\s*")]
     PropertyStart,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"%]+")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"%@`]")]
     MiscText,
     #[token("\\")]
     Backslash,
+    // #[regex(r"\\u\{[a-f0-9]\}")]
+    //Unicode,
+    #[regex(r"[^\u0000-\u007F]+")]
+    Unicode,
 }
 
 impl ZkToken {
@@ -210,7 +214,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                                 if slice.ends_with(')') {
                                     break;
                                 } else if slice.contains(')') {
-                                    panic!("No slice should contain ')' ")
+                                    bail!("No slice should contain ')', but got {slice:?}");
                                 }
                             }
                         } else {
@@ -259,7 +263,27 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         let fm = parse_frontmatter(&mut lexer, file_dir)?;
                         res.push(fm);
                     }
-                    _ => todo!("Support missing token types: {token:?}"),
+                    Unicode => {
+                        let slice = lexer.slice();
+                        /*if let Some((_, code)) = slice.split_once('{') {
+                            let code = code.trim_end_matches('}');
+                            let unicode = u32::from_str_radix(code, 16)
+                                .context(format!("Could not generate unicode for {slice:?}!"))?;
+                            let text = char::from_u32(unicode)
+                                .context(format!(
+                                    "Failed to get char for unicode {unicode}, input: {slice:?}"
+                                ))?
+                                .to_string();
+                            res.push(DocumentComponent::new_text(&text));
+                        }*/
+                        res.push(DocumentComponent::new_text(slice));
+                    }
+                    _ => {
+                        debug!(
+                            "Support missing token types: {token:?}. Falling back to adding text"
+                        );
+                        res.push(DocumentComponent::new_text(lexer.slice()));
+                    }
                 }
             }
             Err(_) => {
@@ -464,12 +488,13 @@ fn parse_frontmatter(
 }
 
 fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
-    let slice = lexer.slice().escape_default();
+    let orig_slice = lexer.slice();
+    let slice = orig_slice.escape_default().to_string();
     let start = lexer.span().start;
     let text = lexer.source();
     let line = text[0..start].lines().count();
     format!(
-        "Encountered '{slice}' at {:?} (line {line}); {lexer:?}",
+        "Encountered '{orig_slice}' ({slice:?}) at {:?} (line {line}); {lexer:?}",
         lexer.span()
     )
 }
@@ -910,6 +935,19 @@ fn test_curly_braces() {
 }
 
 #[test]
+fn test_unicode() {
+    let text = "🥭🍚";
+    let res = parse_zk_text(text, &None);
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let res = pd.to_zk_text(&None);
+        assert_eq!(text, res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
 fn test_multi_property() {
     use crate::document_component::PropValue;
     let text = "property::= [test]";
@@ -1019,6 +1057,27 @@ fn test_multi_property_file_link() {
         let res = pd.to_zk_text(&None);
         let expected = "property ::= [[test](../test.md)]";
         assert_eq!(expected, res);
+    } else {
+        panic!("Error: {res:?}");
+    }
+}
+
+#[test]
+fn test_property_text() {
+    use crate::document_component::PropValue;
+    let text = "property ::= value";
+    let res = parse_zk_text(text, &None);
+    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+        "property".to_string(),
+        true,
+        vec![PropValue::String("value".to_string())],
+    )]));
+    debug!("final parse: {res:?}");
+    if let Ok(pd) = res {
+        let expected = ParsedDocument::ParsedText(vec![prop]);
+        assert_eq!(pd, expected);
+        let res = pd.to_zk_text(&None);
+        assert_eq!(res, text);
     } else {
         panic!("Error: {res:?}");
     }
