@@ -3,9 +3,10 @@ use clap::{builder::PossibleValue, ValueEnum};
 use std::path::PathBuf;
 
 use crate::{
-    document_component::ParsedDocument,
+    document_component::{DocumentComponent, ParsedDocument},
     logseq_parsing::{parse_logseq_file, parse_logseq_text},
     obsidian_parsing::{parse_obsidian_file, parse_obsidian_text},
+    util::files_in_tree,
     zk_parsing::{parse_zk_file, parse_zk_text},
 };
 
@@ -44,11 +45,17 @@ pub fn parse_text(
     }
 }
 
-pub fn parse_file(file: &PathBuf, mode: TextMode) -> Result<ParsedDocument> {
+pub fn parse_file(file: &PathBuf, mode: &TextMode) -> Result<ParsedDocument> {
     use TextMode::*;
     match mode {
         Obsidian => parse_obsidian_file(file),
         LogSeq => parse_logseq_file(file),
         Zk => parse_zk_file(file),
     }
+}
+
+/// recursively parses all files in the given directory
+pub fn parse_all_files_in_dir(root_dir: &PathBuf, mode: &TextMode) -> Result<Vec<ParsedDocument>> {
+    let files = files_in_tree(root_dir, &Some(vec!["md"]))?;
+    files.iter().map(|f| parse_file(f, &mode)).collect()
 }

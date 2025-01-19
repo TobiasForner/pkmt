@@ -79,6 +79,7 @@ impl ParsedDocument {
             ParsedText(comps) => comps,
         }
     }
+
     pub fn into_components(self) -> Vec<DocumentComponent> {
         use ParsedDocument::*;
         match self {
@@ -93,6 +94,7 @@ impl ParsedDocument {
             ParsedDocument::ParsedText(comps) => comps.push(component),
         }
     }
+
     pub fn get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
@@ -106,6 +108,7 @@ impl ParsedDocument {
 
         None
     }
+
     pub fn get_all_document_components(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
@@ -400,6 +403,10 @@ impl Property {
 
     pub fn has_name(&self, name: &str) -> bool {
         self.name == name
+    }
+
+    pub fn has_value(&self, value: &PropValue) -> bool {
+        self.values.iter().any(|v| v == value)
     }
 
     pub fn add_values(&mut self, values: &[PropValue]) {
@@ -1132,7 +1139,7 @@ pub fn convert_file(
     outmode: TextMode,
 ) -> Result<Vec<String>> {
     let file = &file_info.original_file;
-    let pd = parse_file(file, inmode);
+    let pd = parse_file(file, &inmode);
 
     if let Ok(pd) = pd {
         let mentioned_files = pd.mentioned_files();

@@ -5,14 +5,14 @@ mod youtube_details;
 use std::{
     collections::HashMap,
     fmt::Debug,
-    fs::{DirEntry, FileType, ReadDir},
+    fs::DirEntry,
     path::{Path, PathBuf},
     str::FromStr,
     vec,
 };
 use test_log::test;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use interactive::{get_interactive_data, handle_interactive_data};
 use regex::Regex;
 use tracing::{debug, info, instrument};
@@ -22,14 +22,14 @@ use crate::{
         DocumentComponent, DocumentElement, FileInfo, MentionedFile, ParsedDocument, PropValue,
     },
     logseq_parsing::parse_logseq_file,
-    parse::{parse_file, TextMode},
+    parse::{parse_all_files_in_dir, parse_file, TextMode},
     todoi::{
         config::Config,
-        interactive::{handle_interactive, Resolution},
+        interactive::Resolution,
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
     },
-    zk_parsing::{self, parse_zk_text},
+    zk_parsing::{self},
 };
 
 #[derive(Debug)]
@@ -142,9 +142,11 @@ impl ZkHandler {
 
             let lookup_path = data_dir.join("creator_lookup.toml");
             let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
+                debug!("loading lookup table from file.");
                 let text = std::fs::read_to_string(&lookup_path)?;
                 toml::from_str(&text)?
             } else {
+                debug!("creating now lookup table.");
                 HashMap::new()
             };
             if let Some(path) = lookup.get(name) {
@@ -160,7 +162,7 @@ impl ZkHandler {
                 debug!("{name:?}: created new creator file: {file:?}");
                 lookup.insert(name.to_string(), file.clone());
                 let text = toml::to_string(&lookup)?;
-                let res = std::fs::write(&lookup_path, text);
+                std::fs::write(&lookup_path, text)?;
                 Ok(file)
             }
         } else {
@@ -201,6 +203,7 @@ impl ZkHandler {
         file_dir: &Option<PathBuf>,
     ) -> Result<bool> {
         let file = self.get_zk_creator_file(author)?;
+        debug!("Found creator file {file:?} for {author:?}");
         self.fill_props(
             pd,
             prop_name,
@@ -294,7 +297,7 @@ impl ZkHandler {
     #[instrument]
     fn append_to_zk_journal(&self, dc: DocumentComponent) -> Result<bool> {
         let journal_path = ZkHandler::get_zk_journal_file()?;
-        let mut pd = parse_file(&journal_path, TextMode::Zk)?;
+        let mut pd = parse_file(&journal_path, &TextMode::Zk)?;
         debug!("adding {dc:?} to journal file");
         pd.add_component(dc);
         let file_info =
@@ -358,6 +361,12 @@ impl TaskDataHandler for ZkHandler {
     #[instrument]
     fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
         debug!("handling {task_data:?}");
+        if let Some(url) = task_data.get_url() {
+            if url_is_duplicate(url, &self.root_dir, &TextMode::Zk)? {
+                info!("Duplicate url: {url}! Skipping {task_data:?}");
+                return Ok(false);
+            }
+        }
         let Some(title) = task_data.get_title() else {
             debug!("no title!");
             return Ok(false);
@@ -776,6 +785,17 @@ impl TaskData {
             Interactive(_, _, _, tags) => tags.clone(),
         }
     }
+
+    fn get_url(&self) -> Option<&str> {
+        use TaskData::*;
+        match self {
+            Unhandled => None,
+            Youtube(url, _, _, _) => Some(url),
+            Sbs(url, _, _, _) => Some(url),
+            YtPlaylist(url, _, _) => Some(url),
+            Interactive(_, url, _, _) => url.as_deref(),
+        }
+    }
 }
 
 fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
@@ -1075,8 +1095,39 @@ fn handle_sbs_tasks(
     }
 }
 
+fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bool> {
+    let parsed_documents = parse_all_files_in_dir(root_dir, mode)?;
+    let mut res = false;
+    parsed_documents.iter().for_each(|pd| {
+        if pd
+            .get_document_component(&|dc: &DocumentComponent| {
+                if let DocumentElement::Properties(props) = dc.get_element() {
+                    props.iter().any(|p| {
+                        p.has_name("url") && p.has_value(&PropValue::String(url.to_string()))
+                    })
+                } else {
+                    false
+                }
+            })
+            .is_some()
+        {
+            res = true;
+        }
+    });
+    Ok(res)
+}
+
 #[test]
 fn test_add_to_yt_pd() {
+    use zk_parsing::parse_zk_text;
+    // PROBLEM: this test currently relies on a bug introduced earlier: test_channel has file "" in
+    // the lookup file.
+    // Maybe this test should be disabled as it seems difficult to fix.
+    // or we could provide the lookup table to add_to_zk_pd, which would make the code a bit more
+    // complicated as then the caller would be responsible for managing the lookup table and
+    // creating a new file if required.
+    // Maybe it would be best to wrap the lookup table in a struct and to use a mock object for
+    // tests
     let text = "---
 date: 2024-12-31 01:09:55
 tags: [video, youtube, inbox]
@@ -1105,7 +1156,7 @@ tags: [video, youtube, inbox, tag1, tag2]
 ---
 
 # title
-- channel ::= test_channel
+- channel ::= [test_channel]()
 - description ::= title
 - url ::= url";
     assert_eq!(res, expected);
