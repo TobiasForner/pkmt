@@ -3,7 +3,7 @@ use clap::{builder::PossibleValue, ValueEnum};
 use std::path::PathBuf;
 
 use crate::{
-    document_component::{DocumentComponent, ParsedDocument},
+    document_component::ParsedDocument,
     logseq_parsing::{parse_logseq_file, parse_logseq_text},
     obsidian_parsing::{parse_obsidian_file, parse_obsidian_text},
     util::files_in_tree,

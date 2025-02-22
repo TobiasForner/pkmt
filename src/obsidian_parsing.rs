@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use crate::document_component::{
     collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
 };
-use logos::{Lexer, Logos, Source};
+use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, PartialEq)]
 enum ObsidianToken {
