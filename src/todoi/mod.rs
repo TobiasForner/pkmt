@@ -85,10 +85,10 @@ impl LogSeqTemplates {
 /// gathers tasks and calls the correct handler
 /// tasks are marked as completed if complete_tasks is set
 pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<()> {
-    let config = Config::parse(PathBuf::from_str(
+    let config = Config::load(&PathBuf::from_str(
         "/mnt/c/Users/Tobias/AppData/Local/todoist_import/todoist_import/todoi_config.toml",
-    )?);
-    let todoist_api = TodoistAPI::new(&config.todoist_api_key);
+    )?)?;
+    let todoist_api = TodoistAPI::new(&config.keys.todoist_api_key);
     let inbox = todoist_api.get_inbox()?;
 
     let inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
@@ -805,7 +805,8 @@ fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
     if let Some(m) = yt_video_url_re.captures(&task.content) {
         if let Some(video_url) = m.get(0) {
             let video_url = video_url.as_str();
-            if let Ok((video_title, authors)) = youtube_details(video_url, &config.yt_api_key) {
+            if let Ok((video_title, authors)) = youtube_details(video_url, &config.keys.yt_api_key)
+            {
                 let mut tags = vec![];
 
                 if let Some(mut ct) = config.get_channel_tags(&authors) {
@@ -899,7 +900,7 @@ fn handle_youtube_playlist(task: &TodoistTask, config: &Config) -> TaskData {
     if playlist_re.captures(&task.content).is_some() {
         let playlist_url = task.content.clone();
         if let Ok((description, channel)) =
-            youtube_playlist_details(&playlist_url, &config.yt_api_key)
+            youtube_playlist_details(&playlist_url, &config.keys.yt_api_key)
         {
             return TaskData::YtPlaylist(playlist_url, channel, description);
         }
@@ -935,7 +936,9 @@ fn handle_youtube_tasks(
                 let mut add = vec![];
                 let mut tags = vec![];
 
-                if let Ok((video_title, authors)) = youtube_details(video_url, &config.yt_api_key) {
+                if let Ok((video_title, authors)) =
+                    youtube_details(video_url, &config.keys.yt_api_key)
+                {
                     add.push(("authors", vec![format!("[[{authors}]]")]));
                     if let Some(mut ct) = config.get_channel_tags(&authors) {
                         tags.append(&mut ct);
@@ -991,7 +994,7 @@ fn handle_youtube_playlists(
             let mut temp = templates.get_template_comp("youtube_playlist").unwrap();
             if let ListElement(_, props) = temp.get_element_mut() {
                 if let Ok((description, channel)) =
-                    youtube_playlist_details(playlist_url, &config.yt_api_key)
+                    youtube_playlist_details(playlist_url, &config.keys.yt_api_key)
                 {
                     *props = fill_properties(
                         props,
