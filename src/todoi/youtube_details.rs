@@ -3,10 +3,20 @@ use std::str::FromStr;
 
 pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
     let client = reqwest::Client::new();
+    let resolved = client.get(video_url).send();
+    let runtime = tokio::runtime::Runtime::new()?;
+    let res = runtime.block_on(resolved);
+
+    let video_url = if let Ok(res) = res {
+        res.url().to_string()
+    } else {
+        video_url.to_string()
+    };
+    println!("Resolved {video_url} to {video_url}");
     let id = if let Some(pos) = video_url.find("/shorts/") {
         Some(video_url[pos + 8..video_url.len()].to_string())
     } else {
-        reqwest::Url::from_str(video_url)?
+        reqwest::Url::from_str(&video_url)?
             .query_pairs()
             .find(|(k, _)| k == "v")
             .map(|(_, id)| id.to_string())
