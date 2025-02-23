@@ -81,7 +81,8 @@ impl ZkToken {
 
 pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
     let file_path = file_path.as_ref().canonicalize()?;
-    let text = std::fs::read_to_string(&file_path)?;
+    let text =
+        std::fs::read_to_string(&file_path).context("Failed to read zk file: {file_path:?}")?;
 
     let file_dir = file_path
         .parent()

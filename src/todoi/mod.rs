@@ -143,7 +143,8 @@ impl ZkHandler {
             let lookup_path = data_dir.join("creator_lookup.toml");
             let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
                 debug!("loading lookup table from file.");
-                let text = std::fs::read_to_string(&lookup_path)?;
+                let text = std::fs::read_to_string(&lookup_path)
+                    .context("Expected {lookup_path:?} to exist!")?;
                 toml::from_str(&text)?
             } else {
                 debug!("creating now lookup table.");
@@ -162,7 +163,8 @@ impl ZkHandler {
                 debug!("{name:?}: created new creator file: {file:?}");
                 lookup.insert(name.to_string(), file.clone());
                 let text = toml::to_string(&lookup)?;
-                std::fs::write(&lookup_path, text)?;
+                std::fs::write(&lookup_path, text)
+                    .context(format!("Could not write to {lookup_path:?}"))?;
                 Ok(file)
             }
         } else {
@@ -395,7 +397,8 @@ impl TaskDataHandler for ZkHandler {
             let file_info = FileInfo::try_new(zk_file.clone(), Some(zk_file.clone()), None, None)?;
             let text = pd.to_zk_text(&Some(file_info));
             debug!("added {task_data:?} to pd with result: {text:?}");
-            let _ = std::fs::write(&zk_file, text);
+
+            std::fs::write(&zk_file, text).context(format!("Failed to write to {zk_file:?}!"))?;
             let mention = DocumentComponent::new(DocumentElement::FileLink(
                 MentionedFile::FilePath(zk_file),
                 None,
@@ -692,7 +695,8 @@ impl TaskDataHandler for LogSeqHandler {
         std::fs::write(
             &self.todays_journal_file,
             self.todays_journal.to_logseq_text(&None),
-        )?;
+        )
+        .context(format!("Could not write to {:?}", self.todays_journal_file))?;
         Ok(true)
     }
     fn get_template_names(&self) -> Result<Vec<String>> {

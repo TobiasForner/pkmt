@@ -67,7 +67,9 @@ struct Tags {
 
 impl Tags {
     fn parse(tags_path: &PathBuf) -> Result<Self> {
-        let text = std::fs::read_to_string(tags_path)?.replace("\r\n", "\n");
+        let text = std::fs::read_to_string(tags_path)
+            .context(format!("Failed to read tags file {tags_path:?}"))?
+            .replace("\r\n", "\n");
         toml::from_str(&text).context("Failed to parse tags!")
     }
 }
