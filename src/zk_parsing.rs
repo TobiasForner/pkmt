@@ -63,7 +63,7 @@ enum ZkToken {
     // the pipes are a workaround for a known bug with * in regex patterns, see e.g. https://github.com/maciejhirsz/logos/issues/456
     #[regex(r"[a-zA-Z_]+(\s|\s\s|\s\s\s|)::=\s*")]
     PropertyStart,
-    #[regex("[.{}^$><,0-9():=*&/;'+!?\"%@`]")]
+    #[regex("[.{}^$><,0-9():=*&/;'+!?\"%@`~]")]
     MiscText,
     #[token("\\")]
     Backslash,
