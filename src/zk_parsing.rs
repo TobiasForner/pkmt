@@ -89,7 +89,8 @@ pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
         .context(format!("{file_path:?} has no parent!"))?
         .to_path_buf();
 
-    let pt = parse_zk_text(&text, &Some(file_dir))?;
+    let pt = parse_zk_text(&text, &Some(file_dir))
+        .context(format!("Failed to parse zk file {file_path:?}"))?;
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
