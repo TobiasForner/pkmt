@@ -702,7 +702,7 @@ impl DocumentElement {
             FileLink(file, _, name) => {
                 match file {
                     MentionedFile::FileName(_) => {
-                        todo!("handel zk conversion for mentioned file names")
+                        todo!("handle zk conversion for mentioned file names")
                     }
                     MentionedFile::FilePath(p) => {
                         debug!("file link: {file:?}; {name:?}");
@@ -721,7 +721,8 @@ impl DocumentElement {
                         let p = p.as_os_str();
                         let p = p.to_string_lossy();
                         if let Some(name) = name {
-                            format!("[{name}]({p})")
+                            let sanitized_name = name.replace(['[', ']'], "");
+                            format!("[{sanitized_name}]({p})")
                         } else {
                             format!("[{p}]({p})")
                         }
