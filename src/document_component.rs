@@ -540,7 +540,7 @@ impl DocumentElement {
                 };
                 if let Some(file_info) = file_info {
                     if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
-                        if let Some((name, ext)) = file_name.rsplit_once('.') {
+                        if let Some((_name, ext)) = file_name.rsplit_once('.') {
                             if ["png", "jpeg"].contains(&ext) {
                                 debug!("image: {file_name}: {file_info:?}");
                                 let dest_dir = dest_file.parent().unwrap();
@@ -744,7 +744,7 @@ impl DocumentElement {
                 };
                 if let Some(file_info) = file_info {
                     if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
-                        if let Some((name, ext)) = file_name.rsplit_once('.') {
+                        if let Some((_name, ext)) = file_name.rsplit_once('.') {
                             if ["png", "jpeg"].contains(&ext) {
                                 debug!("image: {file_name}: {file_info:?}");
                                 let dest_dir = dest_file.parent().unwrap();
