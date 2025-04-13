@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use todoi::ZkHandler;
+use todoi::{get_zk_creator_file, set_zk_creator_file};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 extern crate tracing;
 
@@ -91,7 +91,20 @@ enum Commands {
         name: String,
         #[arg(short, long, required = false)]
         mode: Option<TextMode>,
-        #[arg(short, long, required = false)]
+        #[clap(subcommand)]
+        creator_command: CreatorCommand,
+    },
+}
+
+#[derive(Clone, Subcommand)]
+enum CreatorCommand {
+    Delete,
+    Overwrite {
+        #[arg(short, long)]
+        new_file: PathBuf,
+    },
+    ShowFile {
+        #[arg(short, long)]
         relative: Option<PathBuf>,
     },
 }
@@ -224,21 +237,30 @@ fn run() -> Result<()> {
             root_dir,
             name,
             mode,
-            relative,
+            creator_command,
         }) => {
             let mode = mode.unwrap_or(TextMode::Zk);
             match mode {
                 TextMode::Zk => {
-                    let handler = ZkHandler::new(root_dir);
-                    let mut file = handler.get_zk_creator_file(&name)?;
-                    if let Some(relative) = relative {
-                        if let Some(rel) = relative.parent() {
-                            if let Some(rel) = pathdiff::diff_paths(&file, rel) {
-                                file = rel.to_path_buf();
+                    match creator_command {
+                        CreatorCommand::Delete => {
+                            todo!("not implemented!")
+                        }
+                        CreatorCommand::Overwrite { new_file } => {
+                            set_zk_creator_file(&root_dir, &name, &new_file)?;
+                        }
+                        CreatorCommand::ShowFile { relative } => {
+                            let mut file = get_zk_creator_file(&root_dir, &name)?;
+                            if let Some(relative) = relative {
+                                if let Some(rel) = relative.parent() {
+                                    if let Some(rel) = pathdiff::diff_paths(&file, rel) {
+                                        file = rel.to_path_buf();
+                                    }
+                                }
                             }
+                            println!("{}", file.to_string_lossy());
                         }
                     }
-                    println!("{}", file.to_string_lossy());
                     Ok(())
                 }
                 _ => todo!("to implement: retrieve creator file for {mode:?}"),

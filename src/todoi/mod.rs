@@ -122,6 +122,71 @@ fn add_to_zk(
     res
 }
 
+pub fn set_zk_creator_file(root_dir: &PathBuf, name: &str, new_file: &PathBuf) -> Result<()> {
+    if !new_file.exists() {
+        bail!("new creator file {new_file:?} does not exist!");
+    }
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let data_dir = base_dirs.data_dir().join("pkmt");
+        if !data_dir.exists() {
+            std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
+        }
+
+        let lookup_path = data_dir.join("creator_lookup.toml");
+        let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
+            debug!("loading lookup table from file.");
+            let text = std::fs::read_to_string(&lookup_path)
+                .context("Expected {lookup_path:?} to exist!")?;
+            toml::from_str(&text)?
+        } else {
+            debug!("creating now lookup table.");
+            HashMap::new()
+        };
+        lookup.insert(name.to_string(), new_file.clone());
+        let text = toml::to_string(&lookup)?;
+        std::fs::write(&lookup_path, text)
+            .context(format!("Could not write to {lookup_path:?}"))?;
+        Ok(())
+    } else {
+        bail!("Could not create basedirs!")
+    }
+}
+
+pub fn get_zk_creator_file(root_dir: &PathBuf, name: &str) -> Result<PathBuf> {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let data_dir = base_dirs.data_dir().join("pkmt");
+        if !data_dir.exists() {
+            std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
+        }
+
+        let lookup_path = data_dir.join("creator_lookup.toml");
+        let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
+            debug!("loading lookup table from file.");
+            let text = std::fs::read_to_string(&lookup_path)
+                .context("Expected {lookup_path:?} to exist!")?;
+            toml::from_str(&text)?
+        } else {
+            debug!("creating now lookup table.");
+            HashMap::new()
+        };
+        if let Some(path) = lookup.get(name) {
+            debug!("{name:?}: found creator file in lookup: {path:?}");
+            Ok(path.to_path_buf())
+        } else {
+            let template_file = root_dir.join(".zk").join("templates").join("creator.md");
+            let file = ZkHandler::get_zk_file(name, template_file)?;
+            debug!("{name:?}: created new creator file: {file:?}");
+            lookup.insert(name.to_string(), file.clone());
+            let text = toml::to_string(&lookup)?;
+            std::fs::write(&lookup_path, text)
+                .context(format!("Could not write to {lookup_path:?}"))?;
+            Ok(file)
+        }
+    } else {
+        bail!("Could not create basedirs!")
+    }
+}
+
 #[derive(Debug)]
 pub struct ZkHandler {
     root_dir: PathBuf,
@@ -130,46 +195,6 @@ pub struct ZkHandler {
 impl ZkHandler {
     pub fn new(root_dir: PathBuf) -> Self {
         Self { root_dir }
-    }
-
-    #[instrument]
-    pub fn get_zk_creator_file(&self, name: &str) -> Result<PathBuf> {
-        if let Some(base_dirs) = directories::BaseDirs::new() {
-            let data_dir = base_dirs.data_dir().join("pkmt");
-            if !data_dir.exists() {
-                std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
-            }
-
-            let lookup_path = data_dir.join("creator_lookup.toml");
-            let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
-                debug!("loading lookup table from file.");
-                let text = std::fs::read_to_string(&lookup_path)
-                    .context("Expected {lookup_path:?} to exist!")?;
-                toml::from_str(&text)?
-            } else {
-                debug!("creating now lookup table.");
-                HashMap::new()
-            };
-            if let Some(path) = lookup.get(name) {
-                debug!("{name:?}: found creator file in lookup: {path:?}");
-                Ok(path.to_path_buf())
-            } else {
-                let template_file = self
-                    .root_dir
-                    .join(".zk")
-                    .join("templates")
-                    .join("creator.md");
-                let file = ZkHandler::get_zk_file(name, template_file)?;
-                debug!("{name:?}: created new creator file: {file:?}");
-                lookup.insert(name.to_string(), file.clone());
-                let text = toml::to_string(&lookup)?;
-                std::fs::write(&lookup_path, text)
-                    .context(format!("Could not write to {lookup_path:?}"))?;
-                Ok(file)
-            }
-        } else {
-            bail!("Could not create basedirs!")
-        }
     }
 
     #[instrument]
@@ -204,7 +229,7 @@ impl ZkHandler {
         prop_name: &str,
         file_dir: &Option<PathBuf>,
     ) -> Result<bool> {
-        let file = self.get_zk_creator_file(author)?;
+        let file = get_zk_creator_file(&self.root_dir, author)?;
         debug!("Found creator file {file:?} for {author:?}");
         self.fill_props(
             pd,
