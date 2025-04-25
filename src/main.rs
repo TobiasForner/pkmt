@@ -247,7 +247,7 @@ fn run() -> Result<()> {
                             todo!("not implemented!")
                         }
                         CreatorCommand::Overwrite { new_file } => {
-                            set_zk_creator_file(&root_dir, &name, &new_file)?;
+                            set_zk_creator_file(&name, &new_file)?;
                         }
                         CreatorCommand::ShowFile { relative } => {
                             let mut file = get_zk_creator_file(&root_dir, &name)?;

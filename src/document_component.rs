@@ -322,7 +322,7 @@ impl Display for MentionedFile {
 pub struct Property {
     name: String,
     is_single: bool,
-    values: Vec<PropValue>,
+    pub values: Vec<PropValue>,
 }
 
 impl Property {

@@ -13,7 +13,7 @@ use std::{
 use test_log::test;
 
 use anyhow::{bail, Context, Result};
-use interactive::{get_interactive_data, handle_interactive_data};
+use interactive::get_interactive_data;
 use regex::Regex;
 use tracing::{debug, info, instrument};
 
@@ -91,8 +91,10 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<(
     let todoist_api = TodoistAPI::new(&config.keys.todoist_api_key);
     let inbox = todoist_api.get_inbox()?;
 
-    let inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
+    let mut inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
+    inbox_tasks.sort_by_key(|t| t.content.clone());
     info!("Retrieved todoist tasks.");
+    inbox_tasks.dedup_by_key(|t| t.content.clone());
     debug!("mode: {mode:?}");
 
     let completed_tasks = match mode {
@@ -117,12 +119,23 @@ fn add_to_zk(
     config: &Config,
 ) -> Result<Vec<TodoistTask>> {
     let mut zk_handler = ZkHandler::new(zk_root_dir);
-    let res = handle_tasks(inbox_tasks, &mut zk_handler, config);
+    let all_urls = zk_handler.get_all_urls()?;
+    let deduped_tasks: Vec<TodoistTask> = inbox_tasks
+        .iter()
+        .filter_map(|t| {
+            if all_urls.iter().any(|u| t.content.contains(u)) {
+                None
+            } else {
+                Some(t.clone())
+            }
+        })
+        .collect();
+    let res = handle_tasks(&deduped_tasks, &mut zk_handler, config);
     debug!("handled tasks");
     res
 }
 
-pub fn set_zk_creator_file(root_dir: &PathBuf, name: &str, new_file: &PathBuf) -> Result<()> {
+pub fn set_zk_creator_file(name: &str, new_file: &PathBuf) -> Result<()> {
     if !new_file.exists() {
         bail!("new creator file {new_file:?} does not exist!");
     }
@@ -335,6 +348,41 @@ impl ZkHandler {
         std::fs::write(&journal_path, journal_text)
             .context(format!("Could not write file {journal_path:?}"))?;
         Ok(true)
+    }
+
+    fn get_all_urls(&self) -> Result<Vec<String>> {
+        let parsed_documents = parse_all_files_in_dir(&self.root_dir, &TextMode::Zk)?;
+        let prop_dcs: Vec<DocumentComponent> = parsed_documents
+            .iter()
+            .flat_map(|pd| {
+                pd.get_all_document_components(&|dc: &DocumentComponent| {
+                    if let DocumentElement::Properties(props) = dc.get_element() {
+                        props.iter().any(|p| p.has_name("url"))
+                    } else {
+                        false
+                    }
+                })
+                .into_iter()
+            })
+            .collect();
+        let tmp: Vec<String> = prop_dcs
+            .iter()
+            .filter_map(|dc| {
+                if let DocumentElement::Properties(props) = dc.get_element() {
+                    let tmp = props.iter().filter(|p| p.has_name("url")).flat_map(|p| {
+                        p.values.iter().filter_map(|v| match v {
+                            PropValue::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                    });
+                    Some(tmp)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        Ok(tmp)
     }
 
     #[instrument]
