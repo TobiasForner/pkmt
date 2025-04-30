@@ -298,6 +298,10 @@ impl ZkHandler {
                         if success.is_err() {
                             return false;
                         }
+                        let success = self.fill_in_creator(pd, "sbs", "source", file_dir);
+                        if success.is_err() {
+                            return false;
+                        }
                         //self.fill_property(pd, "author", &[author.to_string()], file_dir);
                     }
                 }
@@ -936,7 +940,7 @@ fn handle_sbs_task(task: &TodoistTask) -> TaskData {
     }
 
     let sbs_website_re = Regex::new(r"https://www.strongerbyscience.com/[a-zA-Z-]+/").unwrap();
-    let author_re = Regex::new("<meta name=\"author\" content=\"([a-zA-Z\\s]+)\" />").unwrap();
+    let author_re = Regex::new("<meta name=\"author\" content=\"([a-zA-Z\\s\\-]+)\" />").unwrap();
     if let Some(art_url) = sbs_website_re.captures(&task.content) {
         if let Some(art_url) = art_url.get(0) {
             let article_url = art_url.as_str();
