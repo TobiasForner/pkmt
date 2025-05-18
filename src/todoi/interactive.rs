@@ -151,7 +151,7 @@ pub fn get_interactive_data(
 
 fn url_re() -> Result<Regex> {
     let url_re = Regex::new(
-        r####"\[((?:[\sa-zA-ZüäöÜÄÖ0-9'?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=%&]+)\)"####,
+        r####"\[((?:[\sa-zA-ZüäöÜÄÖ0-9'’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=%&]+)\)"####,
     );
     url_re.context("failed to construct url_re")
 }
