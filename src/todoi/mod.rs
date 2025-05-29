@@ -165,7 +165,7 @@ pub fn set_zk_creator_file(name: &str, new_file: &PathBuf) -> Result<()> {
     }
 }
 
-pub fn get_zk_creator_file(root_dir: &PathBuf, name: &str) -> Result<PathBuf> {
+pub fn get_zk_creator_file(root_dir: &Path, name: &str) -> Result<PathBuf> {
     if let Some(base_dirs) = directories::BaseDirs::new() {
         let data_dir = base_dirs.data_dir().join("pkmt");
         if !data_dir.exists() {
@@ -222,6 +222,10 @@ impl ZkHandler {
             .arg("-p")
             .output()
             .context(format!("failed to retrieve zk file for {title}"))?;
+        if !output.status.success() {
+            println!("Failed to create zk file for title {title:?}!");
+            bail!("Could not create zk file for {title:?}");
+        }
         let p = std::str::from_utf8(&output.stdout)?;
         Ok(PathBuf::from_str(p.trim())?)
     }
@@ -465,6 +469,11 @@ impl TaskDataHandler for ZkHandler {
         let Ok(zk_file) = ZkHandler::get_zk_file(&title, template_file) else {
             return Ok(false);
         };
+        if !zk_file.exists() {
+            println!("zk file {zk_file:?} was not created!");
+            info!("zk file {zk_file:?} was not created!");
+            return Ok(false);
+        }
         debug!("parsing: {zk_file:?}");
         let pd = zk_parsing::parse_zk_file(&zk_file);
         debug!("{pd:?}");
