@@ -105,7 +105,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let mut blank_line = true;
     let indent_spaces = 0;
     // opening [ is not included as this is only run right after encountering [
-    let file_link_re = regex::Regex::new(r"([-a-zäöüA-ZÄÖÜ_ /\.]+)\]\(([-a-zA-Z_/\.]+)\)")?;
+    let file_link_re = regex::Regex::new(r"([-a-zäöüA-ZÄÖÜ_ /\.|]+)\]\(([-a-zA-Z_/\.]+)\)")?;
 
     while let Some(result) = lexer.next() {
         debug!(
@@ -115,6 +115,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
         match result {
             Ok(token) => {
                 match token {
+                    // TODO: figure out whether this is actually ever required
                     EmbedStart => {
                         let parsed = parse_file_link(&mut lexer, file_dir);
                         // no rename for file embeds
