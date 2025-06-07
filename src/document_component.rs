@@ -471,7 +471,13 @@ impl PropValue {
                             format!("[{p}]({p})")
                         }
                     }
-                    MentionedFile::FileName(_name) => todo!(),
+                    MentionedFile::FileName(mentioned_name) => {
+                        if let Some(name) = rename {
+                            format!("[{name}]({mentioned_name})")
+                        } else {
+                            format!("[{mentioned_name}]({mentioned_name})")
+                        }
+                    }
                 },
                 other => {
                     todo!("not implemented: conversion of PropValue to {other:?}")
@@ -701,8 +707,12 @@ impl DocumentElement {
             //TODO: use other parsed properties
             FileLink(file, _, name) => {
                 match file {
-                    MentionedFile::FileName(_) => {
-                        todo!("handle zk conversion for mentioned file names")
+                    MentionedFile::FileName(mentioned_name) => {
+                        if let Some(name) = name {
+                            format!("[{name}]({mentioned_name})")
+                        } else {
+                            format!("[{mentioned_name}]({mentioned_name})")
+                        }
                     }
                     MentionedFile::FilePath(p) => {
                         debug!("file link: {file:?}; {name:?}");

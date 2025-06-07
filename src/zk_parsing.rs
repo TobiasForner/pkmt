@@ -199,11 +199,16 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             debug!("file link match!");
                             let name = c.get(1).map(|name| name.as_str().to_string());
                             let Some(path) = c.get(2) else { panic!("") };
-                            let file_link = DocumentElement::FileLink(
-                                MentionedFile::FilePath(PathBuf::from(path.as_str())),
-                                None,
-                                name,
-                            );
+                            let path = PathBuf::from_str(path.as_str())?;
+
+                            let mf = if path.exists() {
+                                MentionedFile::FilePath(path)
+                            } else {
+                                MentionedFile::FileName(
+                                    path.as_os_str().to_string_lossy().to_string(),
+                                )
+                            };
+                            let file_link = DocumentElement::FileLink(mf, None, name);
                             let file_link = DocumentComponent::new(file_link);
                             res.push(file_link);
 
@@ -234,7 +239,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         res.push(DocumentComponent::new_text("\\"));
                         blank_line = false;
                     }
-                    OpenDoubleBraces => {
+                    /*OpenDoubleBraces => {
                         let parsed = parse_file_link(&mut lexer, file_dir);
                         if let Ok((name, section, rename)) = parsed {
                             res.push(DocumentComponent::new(DocumentElement::FileLink(
@@ -244,7 +249,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             bail!("Something went wrong when trying to parse file link: {parsed:?}")
                         }
                         blank_line = false;
-                    }
+                    }*/
                     MiscText => {
                         res.push(DocumentComponent::new_text(lexer.slice()));
                         blank_line = false;
@@ -826,12 +831,12 @@ A new line!
 #[test]
 fn test_text_parsing() {
     use DocumentElement::*;
-    let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.";
+    let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [maximum clique problem](MaximumClique.md), unless P = NP.";
     let res = parse_zk_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
+        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique.md".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
         assert_eq!(res, expected);
     } else {
         panic!("Got {res:?}")
@@ -1014,7 +1019,7 @@ fn test_multi_property_single_char() {
 }
 
 #[test]
-fn test_single_property_file_link() {
+fn test_single_property_file_name() {
     use crate::document_component::PropValue;
     let text = "property::= [test](../test.md)";
     let res = parse_zk_text(text, &None);
@@ -1022,7 +1027,7 @@ fn test_single_property_file_link() {
         "property".to_string(),
         true,
         vec![PropValue::FileLink(
-            MentionedFile::FilePath(PathBuf::from("../test.md")),
+            MentionedFile::FileName("../test.md".to_string()),
             None,
             Some("test".to_string()),
         )],
@@ -1040,7 +1045,7 @@ fn test_single_property_file_link() {
 }
 
 #[test]
-fn test_multi_property_file_link() {
+fn test_multi_property_file_name() {
     use crate::document_component::PropValue;
     let text = "property::= [[test](../test.md)]";
     let res = parse_zk_text(text, &None);
@@ -1048,7 +1053,7 @@ fn test_multi_property_file_link() {
         "property".to_string(),
         false,
         vec![PropValue::FileLink(
-            MentionedFile::FilePath(PathBuf::from("../test.md")),
+            MentionedFile::FileName("../test.md".to_string()),
             None,
             Some("test".to_string()),
         )],
