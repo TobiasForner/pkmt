@@ -214,6 +214,8 @@ impl ZkHandler {
     fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
         use std::process::Command;
         debug!("trying to get zk file for {title}");
+
+        let title = title.replace('"', "");
         let output = Command::new("zk")
             .arg("new")
             .arg("--no-input")
