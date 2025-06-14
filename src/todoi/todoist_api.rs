@@ -82,6 +82,12 @@ impl TodoistAPI {
             .query(&[("project_id", &project.id)])
             .send();
         let res = self.runtime.block_on(res)?;
+        if res.status() != 200 {
+            println!(
+                "ERROR: failed to retrieve Todoist tasks for project {}!",
+                project.id
+            );
+        }
         let text = self.runtime.block_on(res.text())?;
         serde_json::from_str(&text).context(format!("Could not parse {text}"))
     }
@@ -100,6 +106,9 @@ impl TodoistAPI {
         let req = self.req_base(url).try_clone().unwrap();
 
         let res = self.runtime.block_on(req.send()).unwrap();
+        if res.status() != 200 {
+            println!("ERROR: failed to retrieve projects from Todoist!");
+        }
         let text = self.runtime.block_on(res.text()).unwrap();
         serde_json::from_str(&text).unwrap()
     }
@@ -109,6 +118,7 @@ impl TodoistAPI {
             .get(url)
             .header("Authorization", format!("Bearer {}", self.todoist_api_key))
     }
+
     fn req_base_post(&self, url: &str) -> reqwest::RequestBuilder {
         reqwest::Client::new()
             .post(url)

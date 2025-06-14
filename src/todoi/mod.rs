@@ -105,8 +105,12 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<(
 
     if complete_tasks {
         completed_tasks.iter().for_each(|t| {
-            println!("Completing: {}", t.content);
-            todoist_api.close_task(t);
+            let success = todoist_api.close_task(t);
+            if success {
+                println!("Marked task '{}' as completed", t.content);
+            } else {
+                println!("ERROR: Failed to Mark task '{}' as completed!", t.content);
+            }
         });
     }
     Ok(())
