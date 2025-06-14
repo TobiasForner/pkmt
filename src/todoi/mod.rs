@@ -128,6 +128,7 @@ fn add_to_zk(
         .iter()
         .filter_map(|t| {
             if all_urls.iter().any(|u| t.content.contains(u)) {
+                println!("Found DUPLICATE task: {}", t.content);
                 None
             } else {
                 Some(t.clone())
