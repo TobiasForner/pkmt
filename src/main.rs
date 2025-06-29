@@ -13,6 +13,8 @@ use parse::TextMode;
 use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
+
+use crate::todoi::config::Tags;
 mod document_component;
 mod inspect;
 mod logseq_parsing;
@@ -84,6 +86,10 @@ enum Commands {
         #[arg(short, long, required = false)]
         mode: Option<TextMode>,
     },
+    TodoiConfig {
+        #[clap(subcommand)]
+        tcfg_command: TCfgCommand,
+    },
     Creator {
         #[arg(required = true)]
         root_dir: PathBuf,
@@ -93,6 +99,23 @@ enum Commands {
         mode: Option<TextMode>,
         #[clap(subcommand)]
         creator_command: CreatorCommand,
+    },
+}
+
+#[derive(Clone, Subcommand)]
+enum TCfgCommand {
+    ShowPaths,
+    AddYtTags {
+        #[arg(required = true)]
+        channel: String,
+        #[clap(required = true)]
+        tags: Vec<String>,
+    },
+    AddKwTags {
+        #[arg(required = true)]
+        kw: String,
+        #[clap(required = true)]
+        tags: Vec<String>,
     },
 }
 
@@ -149,6 +172,20 @@ fn run() -> Result<()> {
             todoi::main(graph_root, complete_tasks, mode)?;
             Ok(())
         }
+        Some(Commands::TodoiConfig { tcfg_command }) => match tcfg_command {
+            TCfgCommand::ShowPaths => {
+                crate::todoi::config::Config::show_paths();
+                Ok(())
+            }
+            TCfgCommand::AddYtTags { channel, tags } => {
+                let mut all_tags = Tags::parse()?;
+                all_tags.add_yt_tags(channel, tags)
+            }
+            TCfgCommand::AddKwTags { kw, tags } => {
+                let mut all_tags = Tags::parse()?;
+                all_tags.add_kw_tags(kw, tags)
+            }
+        },
         Some(Commands::Checklist {
             root_dir,
             out_file,
@@ -225,7 +262,7 @@ fn run() -> Result<()> {
 
                 let _: () = matched_files.into_iter().try_for_each(|f| {
                     let rel = pathdiff::diff_paths(&f, &imdir)
-                        .context(format!("Could not get relative path for {:?}", f))?;
+                        .context(format!("Could not get relative path for {f:?}"))?;
                     let target = imout.join(&rel);
                     std::fs::copy(f, target)?;
                     Ok::<(), anyhow::Error>(())

@@ -1,4 +1,4 @@
-mod config;
+pub mod config;
 mod interactive;
 mod todoist_api;
 mod youtube_details;
@@ -85,9 +85,7 @@ impl LogSeqTemplates {
 /// gathers tasks and calls the correct handler
 /// tasks are marked as completed if complete_tasks is set
 pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<()> {
-    let config = Config::load(&PathBuf::from_str(
-        "/mnt/c/Users/Tobias/AppData/Local/todoist_import/todoist_import/todoi_config.toml",
-    )?)?;
+    let config = Config::load()?;
     let todoist_api = TodoistAPI::new(&config.keys.todoist_api_key);
     let inbox = todoist_api.get_inbox()?;
 
