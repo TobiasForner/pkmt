@@ -76,7 +76,7 @@ pub fn handle_interactive(
                 }
             }
         } else {
-            println!("No url match: {:?}", content);
+            println!("No url match: {content:?}");
             return Skip;
         }
         let new_props = fill_properties(props, &add, &["template"]);
@@ -120,7 +120,7 @@ pub fn get_interactive_data(
     };
     let template_name = &template_names[choice];
 
-    println!("Chose {choice}: {}", template_name);
+    println!("Chose {choice}: {template_name}");
     let content = util::apply_substitutions(&task.content);
     let url_re = url_re().unwrap();
     if let Some(captures) = url_re.captures(&content) {
@@ -144,7 +144,7 @@ pub fn get_interactive_data(
             TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
         )
     } else {
-        println!("No url match: {:?} with {url_re:?}", content);
+        println!("No url match: {content:?} with {url_re:?}");
         (Skip, TaskData::Unhandled)
     }
 }
@@ -195,7 +195,7 @@ pub fn handle_interactive_data(
 
     let mut comp = templates.get_template_comp(template_name).unwrap();
 
-    println!("Chose {choice}: {}", template_name);
+    println!("Chose {choice}: {template_name}");
     if let ListElement(_, props) = comp.get_element_mut() {
         let content = util::apply_substitutions(&task.content);
         let url_re = url_re();
@@ -224,7 +224,7 @@ pub fn handle_interactive_data(
                 TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
             );
         } else {
-            println!("No match url: {:?}", content);
+            println!("No match url: {content:?}");
             return (Skip, TaskData::Unhandled);
         }
     }
