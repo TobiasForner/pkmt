@@ -2,6 +2,7 @@ pub mod config;
 mod interactive;
 mod todoist_api;
 mod youtube_details;
+use scraper::{Html, Selector};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -300,23 +301,24 @@ impl ZkHandler {
         };
         if tags_success {
             match task_data {
-                TaskData::Sbs(url, author, _, _) => {
+                TaskData::Sbs(url, author, _, _, desc) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    let success = self.fill_in_creator(pd, "sbs", "source", file_dir);
+                    if success.is_err() {
+                        return false;
+                    }
                     if let Some(author) = author {
                         let success = self.fill_in_creator(pd, author, "source", file_dir);
                         if success.is_err() {
                             return false;
                         }
-                        let success = self.fill_in_creator(pd, "sbs", "source", file_dir);
-                        if success.is_err() {
-                            return false;
-                        }
-                        //self.fill_property(pd, "author", &[author.to_string()], file_dir);
+                    }
+                    if let Some(desc) = desc {
+                        self.fill_property(pd, "description", &[desc.to_string()], file_dir);
                     }
                 }
                 TaskData::Youtube(url, title, channel, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
-                    //self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
                     let success = self.fill_in_creator(pd, channel, "channel", file_dir);
                     if success.is_err() {
                         println!("Could not fill in creator for {url:?}: {success:?}");
@@ -326,7 +328,6 @@ impl ZkHandler {
                 }
                 TaskData::YtPlaylist(url, channel, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
-                    //self.fill_property(pd, "channel", &[channel.to_string()], file_dir);
                     let success = self.fill_in_creator(pd, channel, "channel", file_dir);
                     if success.is_err() {
                         return false;
@@ -463,7 +464,7 @@ impl TaskDataHandler for ZkHandler {
             TaskData::Youtube(_url, _, _channel, _tags) => {
                 self.root_dir.join(".zk/templates/yt_video.md")
             }
-            TaskData::Sbs(_, _, _, _) => self.root_dir.join(".zk/templates/article.md"),
+            TaskData::Sbs(_, _, _, _, _) => self.root_dir.join(".zk/templates/article.md"),
             TaskData::YtPlaylist(_, _, _) => self.root_dir.join(".zk/templates/yt_playlist.md"),
             TaskData::Interactive(template_name, _, _, _) => {
                 self.root_dir.join(".zk/templates").join(template_name)
@@ -725,7 +726,7 @@ impl TaskDataHandler for LogSeqHandler {
                 }
                 self.todays_journal.add_component(yt_template);
             }
-            TaskData::Sbs(url, author, title, tags) => {
+            TaskData::Sbs(url, author, title, tags, description) => {
                 if let Some(comp) = self.templates.get_template_comp("article") {
                     let mut comp = comp.clone();
                     if let ListElement(_, props) = comp.get_element_mut() {
@@ -734,8 +735,18 @@ impl TaskDataHandler for LogSeqHandler {
                             source.push(author.clone());
                         }
                         let url = vec![url.clone()];
-                        let mut add: Vec<(&str, Vec<String>)> =
-                            vec![("source", source), ("url", url), ("tags", tags.clone())];
+
+                        let mut desc = vec![];
+                        if let Some(description) = description {
+                            desc.push(description.to_string());
+                        }
+
+                        let mut add: Vec<(&str, Vec<String>)> = vec![
+                            ("source", source),
+                            ("url", url),
+                            ("tags", tags.clone()),
+                            ("description", desc),
+                        ];
                         if let Some(title) = title {
                             add.push(("description", vec![title.clone()]));
                         }
@@ -851,8 +862,14 @@ pub enum TaskData {
     Unhandled,
     /// url, title, channel, tags
     Youtube(String, String, String, Vec<String>),
-    /// url, optional author, optional title, tags
-    Sbs(String, Option<String>, Option<String>, Vec<String>),
+    /// url, optional author, optional title, tags, optional description
+    Sbs(
+        String,
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+        Option<String>,
+    ),
     /// url, channel, title
     YtPlaylist(String, String, String),
     /// template_name, optional url, optional title, tags
@@ -864,7 +881,7 @@ impl TaskData {
         use TaskData::*;
         match self {
             Youtube(_, title, _, _) => Some(title.to_string()),
-            Sbs(_, _, title, _) => title.clone(),
+            Sbs(_, _, title, _, _) => title.clone(),
             YtPlaylist(_, _, title) => Some(title.to_string()),
             Interactive(_, _, title, _) => title.clone(),
             _ => None,
@@ -875,7 +892,7 @@ impl TaskData {
         match self {
             Unhandled => vec![],
             Youtube(_, _, _, tags) => tags.clone(),
-            Sbs(_, _, _, tags) => tags.clone(),
+            Sbs(_, _, _, tags, _) => tags.clone(),
             YtPlaylist(_, _, _) => vec![],
             Interactive(_, _, _, tags) => tags.clone(),
         }
@@ -886,7 +903,7 @@ impl TaskData {
         match self {
             Unhandled => None,
             Youtube(url, _, _, _) => Some(url),
-            Sbs(url, _, _, _) => Some(url),
+            Sbs(url, _, _, _, _) => Some(url),
             YtPlaylist(url, _, _) => Some(url),
             Interactive(_, url, _, _) => url.as_deref(),
         }
@@ -922,71 +939,60 @@ fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
 fn handle_sbs_task(task: &TodoistTask) -> TaskData {
     let sbs_link_re =
         Regex::new(r"https://ckarchive\.com/b/[a-zA-Z0-9]*\?ck_subscriber_id=2334581400").unwrap();
-    let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
-
-    if let Some(art_url) = sbs_link_re.captures(&task.content) {
-        if let Some(art_url) = art_url.get(0) {
-            let article_url = art_url.as_str();
-            debug!("found sbs url {article_url}");
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            let res = runtime.block_on(reqwest::get(article_url)).unwrap();
-            let text = runtime.block_on(res.text()).unwrap();
-            let author = if let Some(author) = author_re.captures(&text) {
-                let mut author = author.get(1).unwrap().as_str().to_string();
-                if author.ends_with('.') {
-                    author.remove(author.len() - 1);
-                }
-                Some(author)
-            } else {
-                None
-            };
-            let title =
-                if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>")) {
-                    Some(text[start + 7..end].to_string())
-                } else {
-                    None
-                };
-            let tags = vec!["fitness".to_string()];
-            let res = TaskData::Sbs(article_url.to_string(), author, title, tags);
-            debug!("found {res:?} for {task:?}");
-            return res;
-        }
-    }
-
     let sbs_website_re = Regex::new(r"https://www.strongerbyscience.com/[a-zA-Z-]+/").unwrap();
-    let author_re = Regex::new("<meta name=\"author\" content=\"([a-zA-Z\\s\\-]+)\" />").unwrap();
-    if let Some(art_url) = sbs_website_re.captures(&task.content) {
-        if let Some(art_url) = art_url.get(0) {
-            let article_url = art_url.as_str();
-            debug!("found sbs website url {article_url}");
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            let res = runtime.block_on(reqwest::get(article_url)).unwrap();
-            let text = runtime.block_on(res.text()).unwrap();
 
-            //println!("pos: {pos:?}; {text:?}");
-            let author = if let Some(author) = author_re.captures(&text) {
-                let mut author = author.get(1).unwrap().as_str().to_string();
-                if author.ends_with('.') {
-                    author.remove(author.len() - 1);
-                }
-                Some(author)
-            } else {
-                None
-            };
-            let title = if let (Some(start), Some(end)) =
-                (text.find("<title>"), text.find("</title>"))
-            {
-                let title = text[start + 7..end].trim_end_matches(" &#8226; Stronger by Science");
-                Some(title.to_string())
-            } else {
-                None
-            };
-            let tags = vec!["fitness".to_string()];
-            let res = TaskData::Sbs(article_url.to_string(), author, title, tags);
-            debug!("found {res:?} for {task:?}");
-            return res;
-        }
+    let match_data = if let Some(art_url) = sbs_link_re.captures(&task.content) {
+        let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
+        Some((art_url.get(0), author_re))
+    } else {
+        let sbs_website_author_re =
+            Regex::new("<meta name=\"author\" content=\"([a-zA-Z\\s\\-]+)\" />").unwrap();
+        sbs_website_re
+            .captures(&task.content)
+            .map(|art_url| (art_url.get(0), sbs_website_author_re))
+    };
+
+    if let Some((Some(art_url), author_re)) = match_data {
+        let article_url = art_url.as_str();
+        debug!("found sbs website url {article_url}");
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let res = runtime.block_on(reqwest::get(article_url)).unwrap();
+        let text = runtime.block_on(res.text()).unwrap();
+
+        let author = if let Some(author) = author_re.captures(&text) {
+            let mut author = author.get(1).unwrap().as_str().to_string();
+            if author.ends_with('.') {
+                author.remove(author.len() - 1);
+            }
+            Some(author)
+        } else {
+            None
+        };
+
+        let doc = Html::parse_document(&text);
+        let selector = Selector::parse(".elementor-widget-theme-post-excerpt").unwrap();
+        let mut selection = doc.select(&selector);
+        let desc = if let Some(n) = selection.next() {
+            let mut description = String::new();
+            n.text().for_each(|t| description.push_str(t.trim()));
+            Some(description)
+        } else {
+            None
+        };
+
+        let title = if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>"))
+        {
+            let title = text[start + 7..end].trim_end_matches(" &#8226; Stronger by Science");
+            Some(title.to_string())
+        } else {
+            None
+        };
+        let tags = vec!["fitness".to_string()];
+        let res = TaskData::Sbs(article_url.to_string(), author, title, tags, desc);
+        debug!("found {res:?} for {task:?}");
+        return res;
     }
+
     TaskData::Unhandled
 }
 
