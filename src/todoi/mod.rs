@@ -223,7 +223,7 @@ impl ZkHandler {
         let output = Command::new("zk")
             .arg("new")
             .arg("--no-input")
-            .arg(format!("--title={title}"))
+            .arg(format!("--title=\"{title}\""))
             .arg(format!("--template={}", template_path.to_str().unwrap()))
             .arg("-p")
             .output()
