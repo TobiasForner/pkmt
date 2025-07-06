@@ -60,6 +60,21 @@ impl Config {
             .collect()
     }
 
+    pub fn get_url_sources(&self, url: &str) -> Vec<String> {
+        self.tags
+            .url_sources
+            .iter()
+            .filter_map(|us| {
+                if url.contains(&us.url) {
+                    Some(us.sources.clone())
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect()
+    }
+
     pub fn get_channel_tags(&self, channel: &str) -> Option<Vec<String>> {
         self.tags
             .yt_tag
@@ -89,6 +104,7 @@ pub struct Tags {
     yt_tag: Vec<ChannelTags>,
     kw_tag: Vec<KeywordTags>,
     url_tag: Vec<UrlTags>,
+    url_sources: Vec<UrlSources>,
 }
 
 impl Tags {
@@ -118,6 +134,23 @@ impl Tags {
         } else {
             let ut = UrlTags { url, tags };
             self.url_tag.push(ut);
+        }
+        self.write()
+    }
+
+    pub fn add_url_sources(&mut self, url: String, sources: Vec<String>) -> Result<()> {
+        let url_sources = self.url_sources.iter_mut().find(|us| us.url == url);
+        if let Some(url_sources) = url_sources {
+            let sources_to_add: Vec<_> = sources
+                .into_iter()
+                .filter(|t| !url_sources.sources.contains(t))
+                .collect();
+            sources_to_add
+                .into_iter()
+                .for_each(|s| url_sources.sources.push(s));
+        } else {
+            let us = UrlSources { url, sources };
+            self.url_sources.push(us);
         }
         self.write()
     }
@@ -176,4 +209,10 @@ struct KeywordTags {
 struct UrlTags {
     url: String,
     tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UrlSources {
+    url: String,
+    sources: Vec<String>,
 }

@@ -336,11 +336,14 @@ impl ZkHandler {
                 TaskData::Unhandled => {
                     return false;
                 }
-                TaskData::Interactive(_, url, _, _) => {
+                TaskData::Interactive(_, url, _, _, sources) => {
                     if let Some(url) = url {
                         debug!("filled in url");
                         self.fill_property(pd, "url", &[url.to_string()], file_dir);
                     }
+                    sources.iter().for_each(|s| {
+                        let _ = self.fill_in_creator(pd, s, "source", file_dir);
+                    });
                 }
             }
             return true;
@@ -466,7 +469,7 @@ impl TaskDataHandler for ZkHandler {
             }
             TaskData::Sbs(_, _, _, _, _) => self.root_dir.join(".zk/templates/article.md"),
             TaskData::YtPlaylist(_, _, _) => self.root_dir.join(".zk/templates/yt_playlist.md"),
-            TaskData::Interactive(template_name, _, _, _) => {
+            TaskData::Interactive(template_name, _, _, _, _) => {
                 self.root_dir.join(".zk/templates").join(template_name)
             }
             _ => todo!("not implemented: conversion of {task_data:?} to zk."),
@@ -773,7 +776,7 @@ impl TaskDataHandler for LogSeqHandler {
                     self.todays_journal.add_component(temp);
                 }
             }
-            TaskData::Interactive(template_name, url, title, tags) => {
+            TaskData::Interactive(template_name, url, title, tags, sources) => {
                 let mut comp = self.templates.get_template_comp(template_name).unwrap();
                 if let ListElement(_, props) = comp.get_element_mut() {
                     let mut add = vec![];
@@ -784,6 +787,8 @@ impl TaskDataHandler for LogSeqHandler {
                     if let Some(url) = url {
                         add.push(("url", vec![url.clone()]))
                     }
+
+                    add.push(("source", sources.clone()));
                     let new_props = fill_properties(props, &add, &["template"]);
                     *props = new_props;
                     self.todays_journal.add_component(comp);
@@ -872,8 +877,14 @@ pub enum TaskData {
     ),
     /// url, channel, title
     YtPlaylist(String, String, String),
-    /// template_name, optional url, optional title, tags
-    Interactive(String, Option<String>, Option<String>, Vec<String>),
+    /// template_name, optional url, optional title, tags, sources
+    Interactive(
+        String,
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+        Vec<String>,
+    ),
 }
 
 impl TaskData {
@@ -883,7 +894,7 @@ impl TaskData {
             Youtube(_, title, _, _) => Some(title.to_string()),
             Sbs(_, _, title, _, _) => title.clone(),
             YtPlaylist(_, _, title) => Some(title.to_string()),
-            Interactive(_, _, title, _) => title.clone(),
+            Interactive(_, _, title, _, _) => title.clone(),
             _ => None,
         }
     }
@@ -894,7 +905,7 @@ impl TaskData {
             Youtube(_, _, _, tags) => tags.clone(),
             Sbs(_, _, _, tags, _) => tags.clone(),
             YtPlaylist(_, _, _) => vec![],
-            Interactive(_, _, _, tags) => tags.clone(),
+            Interactive(_, _, _, tags, _) => tags.clone(),
         }
     }
 
@@ -905,7 +916,7 @@ impl TaskData {
             Youtube(url, _, _, _) => Some(url),
             Sbs(url, _, _, _, _) => Some(url),
             YtPlaylist(url, _, _) => Some(url),
-            Interactive(_, url, _, _) => url.as_deref(),
+            Interactive(_, url, _, _, _) => url.as_deref(),
         }
     }
 }

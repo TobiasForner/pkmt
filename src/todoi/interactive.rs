@@ -58,6 +58,8 @@ pub fn get_interactive_data(
             println!("No title capture: {content}");
             None
         };
+
+        let mut sources = vec![];
         let url = if let Some(url) = captures.get(2) {
             let url = url.as_str().to_string();
             let url_tags = config.get_url_tags(&url);
@@ -66,6 +68,8 @@ pub fn get_interactive_data(
                     tags.push(ut);
                 }
             });
+
+            sources = config.get_url_sources(&url);
             Some(url)
         } else {
             println!("No url capture: {content}");
@@ -73,7 +77,7 @@ pub fn get_interactive_data(
         };
         (
             ToHandle,
-            TaskData::Interactive(template_name.clone(), url.clone(), title, tags),
+            TaskData::Interactive(template_name.clone(), url.clone(), title, tags, sources),
         )
     } else {
         println!("No url match: {content:?} with {url_re:?}");

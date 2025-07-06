@@ -124,6 +124,12 @@ enum TCfgCommand {
         #[clap(required = true)]
         tags: Vec<String>,
     },
+    AddUrlSources {
+        #[arg(required = true)]
+        url: String,
+        #[clap(required = true)]
+        sources: Vec<String>,
+    },
 }
 
 #[derive(Clone, Subcommand)]
@@ -195,6 +201,10 @@ fn run() -> Result<()> {
             TCfgCommand::AddUrlTags { url, tags } => {
                 let mut all_tags = Tags::parse()?;
                 all_tags.add_url_tags(url, tags)
+            }
+            TCfgCommand::AddUrlSources { url, sources } => {
+                let mut all_tags = Tags::parse()?;
+                all_tags.add_url_sources(url, sources)
             }
         },
         Some(Commands::Checklist {
