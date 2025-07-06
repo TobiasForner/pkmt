@@ -118,6 +118,12 @@ enum TCfgCommand {
         #[clap(required = true)]
         tags: Vec<String>,
     },
+    AddUrlTags {
+        #[arg(required = true)]
+        url: String,
+        #[clap(required = true)]
+        tags: Vec<String>,
+    },
 }
 
 #[derive(Clone, Subcommand)]
@@ -186,6 +192,10 @@ fn run() -> Result<()> {
                 let mut all_tags = Tags::parse()?;
                 all_tags.add_kw_tags(kw, tags)
             }
+            TCfgCommand::AddUrlTags { url, tags } => {
+                let mut all_tags = Tags::parse()?;
+                all_tags.add_url_tags(url, tags)
+            }
         },
         Some(Commands::Checklist {
             root_dir,
@@ -216,7 +226,6 @@ fn run() -> Result<()> {
                 n.text().for_each(|t| description.push_str(t.trim()));
                 println!("{description:?}");
             }
-            //println!("{:?}", selection.next());
             Ok(())
         }
         Some(Commands::Convert {

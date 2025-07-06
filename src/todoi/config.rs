@@ -45,6 +45,21 @@ impl Config {
         Ok(Config { keys, tags })
     }
 
+    pub fn get_url_tags(&self, url: &str) -> Vec<String> {
+        self.tags
+            .url_tag
+            .iter()
+            .filter_map(|ut| {
+                if url.contains(&ut.url) {
+                    Some(ut.tags.clone())
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect()
+    }
+
     pub fn get_channel_tags(&self, channel: &str) -> Option<Vec<String>> {
         self.tags
             .yt_tag
@@ -73,6 +88,7 @@ impl Config {
 pub struct Tags {
     yt_tag: Vec<ChannelTags>,
     kw_tag: Vec<KeywordTags>,
+    url_tag: Vec<UrlTags>,
 }
 
 impl Tags {
@@ -87,6 +103,21 @@ impl Tags {
         } else {
             let ct = ChannelTags { channel, tags };
             self.yt_tag.push(ct);
+        }
+        self.write()
+    }
+
+    pub fn add_url_tags(&mut self, url: String, tags: Vec<String>) -> Result<()> {
+        let ut_tag = self.url_tag.iter_mut().find(|ut| ut.url == url);
+        if let Some(ut_tag) = ut_tag {
+            let tags_to_add: Vec<_> = tags
+                .into_iter()
+                .filter(|t| !ut_tag.tags.contains(t))
+                .collect();
+            tags_to_add.into_iter().for_each(|t| ut_tag.tags.push(t));
+        } else {
+            let ut = UrlTags { url, tags };
+            self.url_tag.push(ut);
         }
         self.write()
     }
@@ -138,5 +169,11 @@ struct ChannelTags {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct KeywordTags {
     keyword: String,
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UrlTags {
+    url: String,
     tags: Vec<String>,
 }

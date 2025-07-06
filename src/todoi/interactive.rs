@@ -134,7 +134,14 @@ pub fn get_interactive_data(
             None
         };
         let url = if let Some(url) = captures.get(2) {
-            Some(url.as_str().to_string())
+            let url = url.as_str().to_string();
+            let url_tags = config.get_url_tags(&url);
+            url_tags.into_iter().for_each(|ut| {
+                if !tags.contains(&ut) {
+                    tags.push(ut);
+                }
+            });
+            Some(url)
         } else {
             println!("No url capture: {content}");
             None
