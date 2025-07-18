@@ -103,7 +103,9 @@ impl Config {
 pub struct Tags {
     yt_tag: Vec<ChannelTags>,
     kw_tag: Vec<KeywordTags>,
+    #[serde(default = "Vec::default")]
     url_tag: Vec<UrlTags>,
+    #[serde(default = "Vec::default")]
     url_sources: Vec<UrlSources>,
 }
 
