@@ -82,7 +82,7 @@ enum Commands {
     Todoi {
         #[arg(required = false)]
         graph_root: Option<PathBuf>,
-        #[arg(short, long, default_value_t = false)]
+        #[arg(short, long, default_value_t = false, required = false)]
         complete_tasks: bool,
         #[arg(short, long, required = false)]
         mode: Option<TextMode>,
@@ -136,7 +136,7 @@ enum TCfgCommand {
 enum CreatorCommand {
     Delete,
     Overwrite {
-        #[arg(short, long)]
+        #[arg(required = true)]
         new_file: PathBuf,
     },
     ShowFile {
