@@ -1,7 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use scraper::{Html, Selector};
 use todoi::{get_zk_creator_file, set_zk_creator_file};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 extern crate tracing;
@@ -224,18 +223,6 @@ fn run() -> Result<()> {
         }
         Some(Commands::Test {}) => {
             println!("Only prints this message atm");
-            let article_url = "https://www.strongerbyscience.com/volume/";
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            let res = runtime.block_on(reqwest::get(article_url)).unwrap();
-            let text = runtime.block_on(res.text()).unwrap();
-            let doc = Html::parse_document(&text);
-            let selector = Selector::parse(".elementor-widget-theme-post-excerpt").unwrap();
-            let mut selection = doc.select(&selector);
-            if let Some(n) = selection.next() {
-                let mut description = String::new();
-                n.text().for_each(|t| description.push_str(t.trim()));
-                println!("{description:?}");
-            }
             Ok(())
         }
         Some(Commands::Convert {

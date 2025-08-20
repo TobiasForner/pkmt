@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
 /*
@@ -53,6 +55,7 @@ pub struct TodoistProject {
 pub struct TodoistTask {
     id: String,
     pub content: String,
+    pub parent_id: Option<String>,
 }
 
 pub struct TodoistAPI {
@@ -90,6 +93,24 @@ impl TodoistAPI {
         }
         let text = self.runtime.block_on(res.text())?;
         serde_json::from_str(&text).context(format!("Could not parse {text}"))
+    }
+
+    pub fn get_lonely_tasks(&self, tasks: &[TodoistTask]) -> Vec<TodoistTask> {
+        let ids_to_filter: HashSet<String> = tasks
+            .iter()
+            .filter_map(|t| {
+                t.parent_id
+                    .as_ref()
+                    .map(|parent_id| (t.id.clone(), parent_id.clone()))
+            })
+            .flat_map(|(a, b)| [a.to_string(), b.to_string()])
+            .collect();
+        let res = tasks
+            .iter()
+            .filter(|t| !ids_to_filter.contains(&t.id))
+            .cloned()
+            .collect();
+        res
     }
 
     pub fn close_task(&self, task: &TodoistTask) -> bool {

@@ -91,6 +91,7 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<(
     let inbox = todoist_api.get_inbox()?;
 
     let mut inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
+    inbox_tasks = todoist_api.get_lonely_tasks(&inbox_tasks);
     inbox_tasks.sort_by_key(|t| t.content.clone());
     info!("Retrieved todoist tasks.");
     inbox_tasks.dedup_by_key(|t| t.content.clone());
