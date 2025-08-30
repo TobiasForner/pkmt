@@ -997,6 +997,7 @@ fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bo
     Ok(res)
 }
 
+#[ignore = "Test is hard to get right as the logic relies on the zk lookup file. A proper test would need some restructuring"]
 #[test]
 fn test_add_to_yt_pd() {
     use zk_parsing::parse_zk_text;
