@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 
-use crate::util;
+use crate::util::{self, file_link_pattern, link_name_pattern};
 
 use super::{config::Config, todoist_api::TodoistTask, TaskData};
 #[derive(Debug)]
@@ -86,9 +86,14 @@ pub fn get_interactive_data(
 }
 
 fn url_re() -> Result<Regex> {
-    let url_re = Regex::new(
+    let pattern = format!(r"\[{}\]\({}\)", link_name_pattern(), file_link_pattern());
+    //let old_pattern =
+    //   r####"\[((?:[\sa-zA-ZüäöÜÄÖ0-9'’’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=%&@#]+)\)"####.to_string();
+    //assert_eq!(pattern, old_pattern);
+    /*let url_re = Regex::new(
         r####"\[((?:[\sa-zA-ZüäöÜÄÖ0-9'’’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+)\]\(([\sa-zA-Z0-9'?!\.:\-/_=%&@#]+)\)"####,
-    );
+    );*/
+    let url_re = Regex::new(&pattern);
     url_re.context("failed to construct url_re")
 }
 

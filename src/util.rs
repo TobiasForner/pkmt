@@ -127,3 +127,12 @@ pub fn files_in_tree<T: AsRef<Path>>(
     }
     Ok(res)
 }
+
+pub fn link_name_pattern() -> String {
+    r####"((?:[\sa-zA-ZüäöÜÄÖ0-9'’’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+)"####
+        .to_string()
+}
+
+pub fn file_link_pattern() -> String {
+    r"([\sa-zA-Z0-9'?!\.:\-/_=%&@#]+)".to_string()
+}

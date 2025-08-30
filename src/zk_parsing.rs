@@ -8,7 +8,10 @@ use test_log::test;
 
 use crate::{
     document_component::Property,
-    util::{apply_substitutions, indent_level, trim_like_first_line_plus},
+    util::{
+        apply_substitutions, file_link_pattern, indent_level, link_name_pattern,
+        trim_like_first_line_plus,
+    },
 };
 use anyhow::{bail, Context, Result};
 use tracing::{debug, instrument};
@@ -105,7 +108,14 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let mut blank_line = true;
     let indent_spaces = 0;
     // opening [ is not included as this is only run right after encountering [
-    let file_link_re = regex::Regex::new(r"([-a-zäöüA-ZÄÖÜ_ /\.|]+)\]\(([-a-zA-Z_/\.]+)\)")?;
+    let file_link_re = regex::Regex::new(&format!(
+        r"{}\]\({}\)",
+        link_name_pattern(),
+        file_link_pattern()
+    ))?;
+    /*let file_link_re = regex::Regex::new(
+        r####"([\sa-zA-ZüäöÜÄÖ0-9'’’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+\]\(([-a-zA-Z_/\.]+)\)"####,
+    )?;*/
 
     while let Some(result) = lexer.next() {
         debug!(
