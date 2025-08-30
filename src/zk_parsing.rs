@@ -210,6 +210,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             let name = c.get(1).map(|name| name.as_str().to_string());
                             let Some(path) = c.get(2) else { panic!("") };
                             let path = PathBuf::from_str(path.as_str())?;
+                            debug!("Got name {name:?} ({:?}) and path {path:?} (regex: {file_link_re:?} ;;; pattern: {})", c.get(1), file_link_re.as_str());
 
                             let mf = if path.exists() {
                                 MentionedFile::FilePath(path)
@@ -220,6 +221,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             };
                             let file_link = DocumentElement::FileLink(mf, None, name);
                             let file_link = DocumentComponent::new(file_link);
+                            debug!("Found file link {file_link:?}");
                             res.push(file_link);
 
                             // consume tokens from the lexer until we have consumed the first
@@ -269,7 +271,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                     }
                     ListStart => {
                         if blank_line {
-                            let le = parse_list_element(&mut lexer, indent_spaces, file_dir)?;
+                            let le = parse_list(&mut lexer, indent_spaces, file_dir)?;
                             let mut comps = le.into_components();
                             res.append(&mut comps);
                             blank_line = true;
@@ -518,7 +520,7 @@ fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
 }
 
 #[instrument]
-fn parse_list_element(
+fn parse_list(
     lexer: &mut Lexer<'_, ZkToken>,
     initial_indent_spaces: usize,
     file_dir: &Option<PathBuf>,
@@ -527,6 +529,10 @@ fn parse_list_element(
     let mut last_was_blank = false;
     let mut blank_line = false;
     let mut text = " ".repeat(initial_indent_spaces);
+    // TODO: find a nicer fix
+    // needed as the parse logic removes the first list start
+    text.push_str("- ");
+    let mut terminated_by_blank_line = false;
     while let Some(token) = lexer.next() {
         let token = match token {
             Ok(token) => token,
@@ -550,6 +556,7 @@ fn parse_list_element(
         }
         if blank_line && last_was_blank {
             debug!("finishing list text search");
+            terminated_by_blank_line = true;
             break;
         }
     }
@@ -560,7 +567,9 @@ fn parse_list_element(
 
     text.lines().for_each(|l| {
         if l.trim().starts_with("- ") {
-            list_components.push((current.clone(), current_indent));
+            if !current.is_empty() {
+                list_components.push((current.clone(), current_indent));
+            }
             current_indent = indent_level(l);
 
             current = l.to_string();
@@ -572,6 +581,7 @@ fn parse_list_element(
     if !current.is_empty() {
         list_components.push((current.clone(), current_indent));
     }
+    debug!("list components: {list_components:?}");
 
     // text contains the text that comprises the list
     //parse_list_element_from_text(&text, file_dir)
@@ -584,6 +594,9 @@ fn parse_list_element(
         if pos >= list_components.len() {
             break;
         }
+    }
+    if terminated_by_blank_line {
+        components.push(DocumentComponent::new_text("\n\n"));
     }
     Ok(ParsedDocument::ParsedText(components))
 }
@@ -613,8 +626,11 @@ fn assemble_blocks_rec(
 
 #[instrument]
 fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<DocumentElement> {
-    let text = text.trim().replacen("- ", "", 1);
-    let pd = parse_zk_text(&text, file_dir)?;
+    // TODO: trailing spaces
+    let text = text.trim_start().strip_prefix("- ").context(format!(
+        "list element text has to start with \\s*- , but got {text:?}"
+    ))?;
+    let pd = parse_zk_text(text, file_dir)?;
     Ok(DocumentElement::ListElement(pd, vec![]))
 }
 
@@ -734,6 +750,7 @@ fn parse_adnote(
     )
 }
 
+#[instrument]
 fn parse_file_link(
     lexer: &mut Lexer<'_, ZkToken>,
     file_dir: &Option<PathBuf>,
@@ -1099,4 +1116,21 @@ fn test_property_text() {
     } else {
         panic!("Error: {res:?}");
     }
+}
+
+#[test]
+fn test_link_in_list() {
+    let text =
+        "- [Radtour München - Starnberger See](../../txpk-radtour-munchen-starnberger-see.md)";
+    let res = parse_zk_text(text, &None).unwrap();
+    let res = res.to_zk_text(&None);
+    assert_eq!(text, res);
+}
+
+#[test]
+fn test_text_after_list() {
+    let text = "- a\n- b\n\nsome other text";
+    let res = parse_zk_text(text, &None).unwrap();
+    let res = res.to_zk_text(&None);
+    assert_eq!(text, res);
 }
