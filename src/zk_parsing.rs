@@ -402,44 +402,6 @@ fn parse_property(
     }
 }
 
-fn parse_single_property(
-    lexer: &Lexer<'_, ZkToken>,
-    file_dir: &Option<PathBuf>,
-) -> Result<Property> {
-    let parts = lexer
-        .slice()
-        .split_once("::=")
-        .context("Single property must contain '::='!")?;
-    let prop_name = parts.0.trim();
-    let prop_value = parse_prop_values(parts.1).0;
-    Ok(Property::new_parse(
-        prop_name.to_string(),
-        true,
-        &prop_value,
-        crate::parse::TextMode::Zk,
-        file_dir,
-    ))
-}
-
-fn parse_multi_property(
-    lexer: &Lexer<'_, ZkToken>,
-    file_dir: &Option<PathBuf>,
-) -> Result<Property> {
-    let parts = lexer
-        .slice()
-        .split_once("::=")
-        .context("Single property must contain '::='!")?;
-    let prop_name = parts.0.trim();
-    let prop_values = parse_prop_values(parts.1).0;
-    Ok(Property::new_parse(
-        prop_name.to_string(),
-        false,
-        &prop_values,
-        crate::parse::TextMode::Zk,
-        file_dir,
-    ))
-}
-
 // returns vec<values>, is_multi_property (in brackets)
 fn parse_prop_values(text: &str) -> (Vec<String>, bool) {
     let text = text.trim();
