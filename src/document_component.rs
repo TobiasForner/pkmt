@@ -151,7 +151,7 @@ impl ParsedDocument {
 
         None
     }
-    pub fn get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
+    pub fn _get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
         match self {
             ParsedDocument::ParsedFile(comps, _) => comps.get_mut(n),
             ParsedDocument::ParsedText(comps) => comps.get_mut(n),
@@ -264,7 +264,7 @@ pub enum MentionedFile {
 }
 
 impl MentionedFile {
-    pub fn to_mode_text(&self, file_info: &Option<FileInfo>, mode: TextMode) -> String {
+    pub fn _to_mode_text(&self, file_info: &Option<FileInfo>, mode: TextMode) -> String {
         use MentionedFile::*;
         use TextMode::*;
         match mode {
