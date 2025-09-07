@@ -1,12 +1,12 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use todoi::{get_zk_creator_file, set_zk_creator_file};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 extern crate tracing;
 
 mod file_checklist;
-use document_component::{convert_file, convert_tree, FileInfo};
+use document_component::{FileInfo, convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
 use parse::TextMode;
@@ -19,6 +19,7 @@ mod document_component;
 mod inspect;
 mod logseq_parsing;
 
+mod md_parsing;
 mod obsidian_parsing;
 mod parse;
 mod todoi;
@@ -176,7 +177,9 @@ fn run() -> Result<()> {
                 if let Ok(notebook_dir) = std::env::var("ZK_NOTEBOOK_DIR") {
                     PathBuf::from(notebook_dir)
                 } else {
-                    bail!("Could not determine zk notebook dir. Either specify it via the environment variable 'ZK_NOTEBOOK_DIR' or specify it directly!");
+                    bail!(
+                        "Could not determine zk notebook dir. Either specify it via the environment variable 'ZK_NOTEBOOK_DIR' or specify it directly!"
+                    );
                 }
             } else {
                 bail!("Could not determine graph root!");
@@ -223,6 +226,7 @@ fn run() -> Result<()> {
         }
         Some(Commands::Test {}) => {
             println!("Only prints this message atm");
+            md_parsing::parse_md_text("test");
             Ok(())
         }
         Some(Commands::Convert {
