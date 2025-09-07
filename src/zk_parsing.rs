@@ -7,7 +7,7 @@ use std::{
 use test_log::test;
 
 use crate::{
-    document_component::Property,
+    document_component::{ListElem, Property},
     util::{
         apply_substitutions, file_link_pattern, indent_level, link_name_pattern,
         trim_like_first_line_plus,
@@ -272,8 +272,9 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                     ListStart => {
                         if blank_line {
                             let le = parse_list(&mut lexer, indent_spaces, file_dir)?;
-                            let mut comps = le.into_components();
-                            res.append(&mut comps);
+                            //let mut comps = le.into_components();
+                            res.push(DocumentComponent::new(le));
+                            //res.append(&mut comps);
                             blank_line = true;
                         } else {
                             res.push(DocumentComponent::new_text("- "));
@@ -486,7 +487,7 @@ fn parse_list(
     lexer: &mut Lexer<'_, ZkToken>,
     initial_indent_spaces: usize,
     file_dir: &Option<PathBuf>,
-) -> Result<ParsedDocument> {
+) -> Result<DocumentElement> {
     // determine the extent of the list
     let mut last_was_blank = false;
     let mut blank_line = false;
@@ -557,10 +558,13 @@ fn parse_list(
             break;
         }
     }
-    if terminated_by_blank_line {
+    /*if terminated_by_blank_line {
         components.push(DocumentComponent::new_text("\n\n"));
-    }
-    Ok(ParsedDocument::ParsedText(components))
+    }*/
+    let elem = DocumentElement::List(components, terminated_by_blank_line);
+    Ok(elem)
+    //Ok(DocumentComponent::new(element))
+    //Ok(ParsedDocument::ParsedText(components))
 }
 
 #[instrument]
@@ -568,10 +572,10 @@ fn assemble_blocks_rec(
     pos: usize,
     block_texts_indent: &[(String, usize)],
     file_dir: &Option<PathBuf>,
-) -> Result<(DocumentComponent, usize)> {
+) -> Result<(ListElem, usize)> {
     let (block_text, i) = &block_texts_indent[pos];
     let block_text = trim_like_first_line_plus(block_text, 2);
-    let first_block = parse_list_element_from_text(&block_text, file_dir)?;
+    let mut first_block = parse_list_element_from_text(&block_text, file_dir)?;
     let mut pos = pos + 1;
     let mut children = vec![];
     while pos < block_texts_indent.len() && block_texts_indent[pos].1 > *i {
@@ -579,21 +583,20 @@ fn assemble_blocks_rec(
         children.push(child);
         pos = new_pos;
     }
+    first_block.children = children;
 
-    Ok((
-        DocumentComponent::new_with_children(first_block, children),
-        pos,
-    ))
+    Ok((first_block, pos))
 }
 
 #[instrument]
-fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<DocumentElement> {
+fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ListElem> {
     // TODO: trailing spaces
     let text = text.trim_start().strip_prefix("- ").context(format!(
         "list element text has to start with \\s*- , but got {text:?}"
     ))?;
     let pd = parse_zk_text(text, file_dir)?;
-    Ok(DocumentElement::ListElement(pd, vec![]))
+    Ok(ListElem::new(pd))
+    //Ok(DocumentElement::ListElement(pd, vec![]))
 }
 
 #[instrument(skip_all)]
@@ -855,16 +858,23 @@ fn test_simple_list() {
     if let Ok(pd) = res {
         assert_eq!(
             pd,
-            ParsedDocument::ParsedText(vec![
-                DocumentComponent::new(DocumentElement::ListElement(
-                    ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 1")]),
-                    vec![]
-                )),
-                DocumentComponent::new(DocumentElement::ListElement(
-                    ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 2")]),
-                    vec![]
-                ))
-            ])
+            ParsedDocument::ParsedText(vec![DocumentComponent::new(DocumentElement::List(
+                vec![
+                    ListElem {
+                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text(
+                            "item 1"
+                        )]),
+                        children: vec![]
+                    },
+                    ListElem {
+                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text(
+                            "item 2"
+                        )]),
+                        children: vec![]
+                    }
+                ],
+                false
+            )),])
         );
     } else {
         panic!("Error: {res:?}");
@@ -877,7 +887,7 @@ fn test_nested_list() {
     let res = parse_zk_text(text, &None);
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
-        assert_eq!(text.replace("    ", "\t"), res);
+        assert_eq!(text, res);
     } else {
         panic!("Error: {res:?}");
     }
@@ -889,7 +899,7 @@ fn test_curly_heading_list() {
     let res = parse_zk_text(text, &None);
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
-        assert_eq!(text.replace("    ", "\t"), res);
+        assert_eq!(text, res);
     } else {
         panic!("Error: {res:?}");
     }
@@ -909,10 +919,7 @@ tags: [video, youtube]
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let res = pd.to_zk_text(&None);
-        assert_eq!(
-            text.replace("    ", "\t").replace("::=", " ::=").trim(),
-            res
-        );
+        assert_eq!(text.replace("::=", " ::=").trim(), res);
     } else {
         panic!("Error: {res:?}");
     }

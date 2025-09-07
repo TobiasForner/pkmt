@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+use test_log::test;
+use tracing::{debug, instrument};
 
 use crate::util::{apply_substitutions, indent_level, trim_like_first_line_plus};
 use anyhow::{bail, Context, Result};
@@ -72,6 +74,7 @@ pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocumen
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
+#[instrument]
 pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use ObsidianToken::*;
     let text = apply_substitutions(text);
@@ -82,7 +85,7 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
     let mut indent_spaces = 0;
 
     while let Some(result) = lexer.next() {
-        println!("{result:?}: '{}'", lexer.slice());
+        println!("{result:?}: '{:?}'", lexer.slice());
         match result {
             Ok(token) => {
                 match token {
@@ -100,14 +103,17 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         }
                     }
                     SingleHash => {
+                        // TODO: only treat as heading if at the start of the line
                         let elem = parse_heading(&mut lexer)?;
                         let comp = DocumentComponent::new(elem);
                         res.push(comp);
-                        res.push(DocumentComponent::new_text("\n"));
+                        //res.push(DocumentComponent::new_text("\n"));
                     }
-                    Name => res.push(DocumentComponent::new(DocumentElement::Text(
-                        lexer.slice().to_string(),
-                    ))),
+                    Name => {
+                        res.push(DocumentComponent::new(DocumentElement::Text(
+                            lexer.slice().to_string(),
+                        )));
+                    }
                     AdNoteStart => {
                         res.push(DocumentComponent::new(parse_adnote(&mut lexer, file_dir)?));
                     }
@@ -117,9 +123,13 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         )));
                     }
                     Newline => {
-                        res.push(DocumentComponent::new(DocumentElement::Text(
-                            "\n".to_string(),
-                        )));
+                        if let Some(c) = res.last() {
+                            if !c.should_have_own_block() {
+                                res.push(DocumentComponent::new(DocumentElement::Text(
+                                    "\n".to_string(),
+                                )));
+                            }
+                        }
                         blank_line = true;
                     }
                     Pipe => {
@@ -144,12 +154,15 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                             bail!("Something went wrong when trying to parse file link: {parsed:?}")
                         }
                     }
-                    MiscText => res.push(DocumentComponent::new_text(lexer.slice())),
+                    MiscText => {
+                        res.push(DocumentComponent::new_text(lexer.slice()));
+                    }
                     CarriageReturn => {
                         res.push(DocumentComponent::new_text("\r"));
                     }
                     ListStart => {
                         if blank_line {
+                            // TODO parse whole list properly
                             if let Ok(le) = parse_list_element(&mut lexer, indent_spaces, file_dir)
                             {
                                 let mut comps = le.into_components();
@@ -173,8 +186,9 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
             }
         }
     }
-    let res = collapse_text(&res);
-    Ok(ParsedDocument::ParsedText(res))
+    let res = ParsedDocument::ParsedText(collapse_text(&res));
+    debug!("result: {res:?}");
+    Ok(res)
 }
 
 fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
@@ -457,13 +471,12 @@ fn test_text_parsing() {
 
 #[test]
 fn test_newlines() {
-    let text = r"														
-## Basic Definitions
+    let text = "\t\t\t\t\n## Basic Definitions
 ![[ApproximationAlgorithm]]
 
 ```ad-note
 title: Theorem 
-Let $n$ denote the number of vertices in an input graph, and consider any constant $\epsilon > 0$. Then there does not exist an $O(n^{\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.
+Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [[MaximumClique|maximum clique problem]], unless P = NP.
 ```
 
 ![[PTAS]]
@@ -550,7 +563,7 @@ fn test_nested_list() {
     let res = parse_obsidian_text(text, &None);
     if let Ok(pd) = res {
         let res = pd.to_logseq_text(&None);
-        assert_eq!(text.replace("    ", "\t"), res);
+        assert_eq!(text, res);
     } else {
         panic!("Error: {res:?}");
     }
