@@ -6,11 +6,15 @@ use std::{
 use test_log::test;
 use tracing::{debug, instrument};
 
-use crate::util::{apply_substitutions, indent_level, trim_like_first_line_plus};
-use anyhow::{bail, Context, Result};
+use crate::{
+    document_component::ListElem,
+    md_parsing::{ListElement, MdComponent, parse_md_text},
+    util::apply_substitutions,
+};
+use anyhow::{Context, Result, bail};
 
 use crate::document_component::{
-    collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
+    DocumentComponent, DocumentElement, MentionedFile, ParsedDocument, collapse_text,
 };
 use logos::{Lexer, Logos};
 
@@ -47,18 +51,10 @@ enum ObsidianToken {
     // Or regular expressions.
     #[regex("[-a-zA-Z_]+")]
     Name,
-    #[token("- ")]
-    ListStart,
     #[regex("[.{}^$><,0-9():=*&/;'+!?\"]+")]
     MiscText,
     #[token("\\")]
     Backslash,
-}
-
-impl ObsidianToken {
-    fn is_blank(&self) -> bool {
-        matches!(self, Self::Space)
-    }
 }
 
 pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
@@ -73,16 +69,62 @@ pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocumen
     let pt = parse_obsidian_text(&text, &Some(file_dir))?;
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
-
 #[instrument]
 pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
+    let parsed_md = parse_md_text(text).context("Failed to parse md")?;
+    let mut components = vec![];
+    parsed_md.into_iter().try_for_each(|comp| match comp {
+        MdComponent::Heading(level, text) => {
+            components.push(DocumentComponent::new(DocumentElement::Heading(
+                level as u16,
+                text,
+            )));
+            Ok::<(), anyhow::Error>(())
+        }
+        MdComponent::Text(text) => {
+            let tmp = parse_obsidian_text_inner(&text, file_dir)?;
+            let mut comps = tmp.into_components();
+            components.append(&mut comps);
+            Ok(())
+        }
+        MdComponent::List(list_elements, terminated_by_blank_line) => {
+            let list_elements: Result<Vec<ListElem>> = list_elements
+                .iter()
+                .map(|le| parse_md_list_element(le, file_dir))
+                .collect();
+            components.push(DocumentComponent::new(DocumentElement::List(
+                list_elements?,
+                terminated_by_blank_line,
+            )));
+            Ok(())
+        }
+    })?;
+
+    Ok(ParsedDocument::ParsedText(components))
+}
+
+fn parse_md_list_element(
+    list_element: &ListElement,
+    file_dir: &Option<PathBuf>,
+) -> Result<ListElem> {
+    let contents = parse_obsidian_text_inner(&list_element.text, file_dir)?;
+    let children: Result<Vec<ListElem>> = list_element
+        .children
+        .iter()
+        .map(|c| parse_md_list_element(c, file_dir))
+        .collect();
+    let mut res = ListElem::new(contents);
+    res.children = children?;
+    Ok(res)
+}
+
+#[instrument]
+pub fn parse_obsidian_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use ObsidianToken::*;
     let text = apply_substitutions(text);
 
     let mut lexer = ObsidianToken::lexer(&text);
     let mut res = vec![];
-    let mut blank_line = true;
-    let mut indent_spaces = 0;
 
     while let Some(result) = lexer.next() {
         println!("{result:?}: '{:?}'", lexer.slice());
@@ -103,11 +145,7 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         }
                     }
                     SingleHash => {
-                        // TODO: only treat as heading if at the start of the line
-                        let elem = parse_heading(&mut lexer)?;
-                        let comp = DocumentComponent::new(elem);
-                        res.push(comp);
-                        //res.push(DocumentComponent::new_text("\n"));
+                        res.push(DocumentComponent::new_text(lexer.slice()));
                     }
                     Name => {
                         res.push(DocumentComponent::new(DocumentElement::Text(
@@ -123,14 +161,13 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         )));
                     }
                     Newline => {
-                        if let Some(c) = res.last() {
-                            if !c.should_have_own_block() {
-                                res.push(DocumentComponent::new(DocumentElement::Text(
-                                    "\n".to_string(),
-                                )));
-                            }
+                        if let Some(c) = res.last()
+                            && !c.should_have_own_block()
+                        {
+                            res.push(DocumentComponent::new(DocumentElement::Text(
+                                "\n".to_string(),
+                            )));
                         }
-                        blank_line = true;
                     }
                     Pipe => {
                         res.push(DocumentComponent::new_text("|"));
@@ -160,25 +197,7 @@ pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                     CarriageReturn => {
                         res.push(DocumentComponent::new_text("\r"));
                     }
-                    ListStart => {
-                        if blank_line {
-                            // TODO parse whole list properly
-                            if let Ok(le) = parse_list_element(&mut lexer, indent_spaces, file_dir)
-                            {
-                                let mut comps = le.into_components();
-                                res.append(&mut comps);
-                            }
-                        } else {
-                            res.push(DocumentComponent::new_text("- "));
-                        }
-                    }
                     _ => todo!("Support missing token types: {token:?}"),
-                }
-
-                if !token.is_blank() {
-                    blank_line = false;
-                } else if blank_line {
-                    indent_spaces += lexer.slice().replace("\t", "    ").len();
                 }
             }
             Err(_) => {
@@ -197,112 +216,6 @@ fn construct_error_details(lexer: &Lexer<'_, ObsidianToken>) -> String {
     let text = lexer.source();
     let line = text[0..start].lines().count();
     format!("Encountered '{slice}' at {:?} (line {line});", lexer.span())
-}
-
-fn parse_list_element(
-    lexer: &mut Lexer<'_, ObsidianToken>,
-    initial_indent_spaces: usize,
-    file_dir: &Option<PathBuf>,
-) -> Result<ParsedDocument> {
-    // determine the extent of the list
-    let mut last_was_blank = false;
-    let mut blank_line = false;
-    let mut text = " ".repeat(initial_indent_spaces);
-    while let Some(Ok(token)) = lexer.next() {
-        text.push_str(lexer.slice());
-        if !token.is_blank() {
-            blank_line = false;
-        }
-        if token == ObsidianToken::Newline {
-            last_was_blank = blank_line;
-            blank_line = true;
-        }
-        if blank_line && last_was_blank {
-            break;
-        }
-    }
-    let mut list_components = vec![];
-    let mut current = String::new();
-    let mut current_indent = 0;
-
-    text.lines().for_each(|l| {
-        if l.trim().starts_with("- ") {
-            list_components.push((current.clone(), current_indent));
-            current_indent = indent_level(l);
-
-            current = l.to_string();
-        } else {
-            current.push('\n');
-            current.push_str(l);
-        }
-    });
-    if !current.is_empty() {
-        list_components.push((current.clone(), current_indent));
-    }
-
-    // text contains the text that comprises the list
-    //parse_list_element_from_text(&text, file_dir)
-    let mut pos = 0;
-    let mut components = vec![];
-    loop {
-        let (comp, new_pos) = assemble_blocks_rec(pos, &list_components, file_dir)?;
-        pos = new_pos;
-        components.push(comp);
-        if pos >= list_components.len() {
-            break;
-        }
-    }
-    Ok(ParsedDocument::ParsedText(components))
-}
-
-fn assemble_blocks_rec(
-    pos: usize,
-    block_texts_indent: &[(String, usize)],
-    file_dir: &Option<PathBuf>,
-) -> Result<(DocumentComponent, usize)> {
-    let (block_text, i) = &block_texts_indent[pos];
-    let block_text = trim_like_first_line_plus(block_text, 2);
-    let first_block = parse_list_element_from_text(&block_text, file_dir)?;
-    let mut pos = pos + 1;
-    let mut children = vec![];
-    while pos < block_texts_indent.len() && block_texts_indent[pos].1 > *i {
-        let (child, new_pos) = assemble_blocks_rec(pos, block_texts_indent, file_dir)?;
-        children.push(child);
-        pos = new_pos;
-    }
-
-    Ok((
-        DocumentComponent::new_with_children(first_block, children),
-        pos,
-    ))
-}
-
-fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<DocumentElement> {
-    let text = text.trim().replacen("- ", "", 1);
-    let pd = parse_obsidian_text(&text, file_dir)?;
-    Ok(DocumentElement::ListElement(pd, vec![]))
-}
-fn parse_heading(lexer: &mut Lexer<'_, ObsidianToken>) -> Result<DocumentElement> {
-    let mut level = 1;
-    let mut text = String::new();
-    while let Some(Ok(token)) = lexer.next() {
-        match token {
-            ObsidianToken::SingleHash => {
-                level += 1;
-            }
-            ObsidianToken::Space => text.push_str(lexer.slice()),
-            ObsidianToken::Name => text.push_str(lexer.slice()),
-            ObsidianToken::MiscText => text.push_str(lexer.slice()),
-            ObsidianToken::CarriageReturn => text.push('\r'),
-            ObsidianToken::Newline => return Ok(DocumentElement::Heading(level, text)),
-            ObsidianToken::Backslash => text.push_str(lexer.slice()),
-            other => bail!(
-                "Failed to parse heading! {other:?}: {}",
-                construct_error_details(lexer)
-            ),
-        }
-    }
-    Ok(DocumentElement::Heading(level, text))
 }
 
 fn parse_adnote(
@@ -538,20 +451,21 @@ Once $S$ contains a vertex ";
 fn test_simple_list() {
     let text = "- item 1\n- item 2";
     let res = parse_obsidian_text(text, &None);
+    let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(DocumentElement::List(
+        vec![
+            ListElem {
+                contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 1")]),
+                children: vec![],
+            },
+            ListElem {
+                contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 2")]),
+                children: vec![],
+            },
+        ],
+        false,
+    ))]);
     if let Ok(pd) = res {
-        assert_eq!(
-            pd,
-            ParsedDocument::ParsedText(vec![
-                DocumentComponent::new(DocumentElement::ListElement(
-                    ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 1")]),
-                    vec![]
-                )),
-                DocumentComponent::new(DocumentElement::ListElement(
-                    ParsedDocument::ParsedText(vec![DocumentComponent::new_text("item 2")]),
-                    vec![]
-                ))
-            ])
-        );
+        assert_eq!(pd, expected);
     } else {
         panic!("Error: {res:?}");
     }
