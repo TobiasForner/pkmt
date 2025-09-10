@@ -2,35 +2,19 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
+use tracing::debug;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use logos::{Lexer, Logos};
 use test_log::test;
-use tracing::debug;
 
 use crate::{
     document_component::{
-        collapse_text, DocumentComponent, DocumentElement, ListElem, MentionedFile, ParsedDocument,
-        PropValue, Property,
+        DocumentComponent, DocumentElement, ListElem, MentionedFile, ParsedDocument, PropValue,
+        Property, collapse_text,
     },
-    util::{self, indent_level, trim_like_first_line_plus},
+    md_parsing::{ListElement, MdComponent, parse_md_text},
 };
-
-fn block_ranges(text: &str) -> Vec<(usize, usize)> {
-    // we use that block start only in a new line and with e sequence of whitespace followed by a dash
-    let block_start = regex::Regex::new(r"(^|\r?\n\r?)(\s*-)(?:\s|$|\n)").unwrap();
-    let captures = util::overlapping_captures(text, block_start.clone(), 2);
-
-    let mut block_bounds: Vec<usize> = captures
-        .iter()
-        .map(|c| {
-            let m = c.get(2).unwrap();
-            m.start()
-        })
-        .collect();
-    block_bounds.push(text.len());
-    block_bounds.windows(2).map(|w| (w[0], w[1])).collect()
-}
 
 pub fn parse_logseq_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
     let file_path = file_path.as_ref().canonicalize()?;
@@ -46,43 +30,54 @@ pub fn parse_logseq_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument>
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
-pub fn parse_logseq_text(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
-    let mut text = text.to_string();
-    if !text.trim().starts_with('-') {
-        text = format!("- {text}");
-    }
-    let bb = block_ranges(&text);
+pub fn parse_logseq_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
+    let parsed_md = parse_md_text(text).context("Failed to parse md")?;
+    println!("{parsed_md:?}");
+    let mut components = vec![];
+    parsed_md.into_iter().try_for_each(|comp| match comp {
+        MdComponent::Heading(level, text) => {
+            components.push(DocumentComponent::new(DocumentElement::Heading(
+                level as u16,
+                text,
+            )));
+            Ok::<(), anyhow::Error>(())
+        }
+        MdComponent::Text(text) => {
+            let tmp = parse_logseq_block(&text, file_dir)?;
+            let mut comps = tmp.into_components();
+            components.append(&mut comps);
+            Ok(())
+        }
+        MdComponent::List(list_elements, terminated_by_blank_line) => {
+            let list_elements: Result<Vec<ListElem>> = list_elements
+                .iter()
+                .map(|le| parse_md_list_element(le, file_dir))
+                .collect();
+            components.push(DocumentComponent::new(DocumentElement::List(
+                list_elements?,
+                terminated_by_blank_line,
+            )));
+            Ok(())
+        }
+    })?;
 
-    let inner_block_ranges_indent: Vec<(usize, usize, usize)> = bb
+    let components = collapse_text(&components);
+    Ok(ParsedDocument::ParsedText(components))
+}
+
+fn parse_md_list_element(
+    list_element: &ListElement,
+    file_dir: &Option<PathBuf>,
+) -> Result<ListElem> {
+    let contents = parse_logseq_block(&list_element.text, file_dir)?;
+    let children: Result<Vec<ListElem>> = list_element
+        .children
         .iter()
-        .map(|(s, e)| {
-            let block = text[*s..*e].to_string();
-            let mut start = 0;
-            // remove starting new lines from blocks
-            while let Some(c) = block.chars().nth(start) {
-                if !['\n', '\r'].contains(&c) {
-                    break;
-                }
-                start += 1;
-            }
-            let block = &block[start..];
-            (*s + start, *e, indent_level(block))
-        })
+        .map(|c| parse_md_list_element(c, file_dir))
         .collect();
-    let mut blocks = vec![];
-    let mut pos = 0;
-    while pos < inner_block_ranges_indent.len() {
-        let (res, new_pos) = assemble_blocks_rec(pos, &inner_block_ranges_indent, &text)?;
-        blocks.push(res);
-        pos = new_pos;
-    }
-    let res = DocumentElement::List(blocks, false);
-    //let blocks = collapse_text(&blocks);
-
-    //let pt = ParsedDocument::ParsedText(blocks);
-    let pt = ParsedDocument::ParsedText(vec![DocumentComponent::new(res)]).collapse_text();
-
-    Ok(pt)
+    let mut res = ListElem::new(contents);
+    res.children = children?;
+    Ok(res)
 }
 
 #[derive(Logos, Debug, PartialEq)]
@@ -127,21 +122,10 @@ enum LogSeqBlockToken {
     Backslash,
 }
 
-fn parse_logseq_block(text: &str) -> Result<ListElem> {
+fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use LogSeqBlockToken::*;
     let text = text.trim();
-    assert_eq!(text.chars().next(), Some('-'));
-
-    assert!([Some(' '), Some('\n'), None].contains(&text.chars().nth(1)));
     let mut properties = vec![];
-    if text.len() < 2 {
-        return Ok(ListElem::new(ParsedDocument::ParsedText(vec![])));
-        /*return Ok(DocumentElement::ListElement(
-            ParsedDocument::ParsedText(vec![]),
-            properties,
-        ));*/
-    }
-    let text = &text[2..].trim();
     let mut lexer = LogSeqBlockToken::lexer(text);
     let mut new_line_or_whitespace = true;
     let mut components = vec![];
@@ -150,6 +134,8 @@ fn parse_logseq_block(text: &str) -> Result<ListElem> {
         if let Ok(token) = result {
             match token {
                 SingleHash => {
+                    // heading needs to be checked as logseq may have a heading inside a list
+                    // element
                     if new_line_or_whitespace {
                         let (heading, rem) = parse_heading(&mut lexer);
                         components.push(DocumentComponent::new(heading));
@@ -214,10 +200,9 @@ fn parse_logseq_block(text: &str) -> Result<ListElem> {
                             }
                         } else if let DocumentElement::ListElement(pd, props) =
                             &rec_components[0].element
+                            && props.is_empty()
                         {
-                            if props.is_empty() {
-                                rec_components = pd.clone().into_components();
-                            }
+                            rec_components = pd.clone().into_components();
                         }
                     };
 
@@ -249,9 +234,7 @@ fn parse_logseq_block(text: &str) -> Result<ListElem> {
         components.insert(0, props);
     }
     let pd = ParsedDocument::ParsedText(components);
-    Ok(ListElem::new(pd))
-    //let list_elem = DocumentElement::ListElement(pd, properties);
-    //k(list_elem)
+    Ok(pd)
 }
 
 fn parse_heading(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> (DocumentElement, String) {
@@ -341,46 +324,12 @@ fn parse_property_value(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> Result<Strin
     Ok(name)
 }
 
-// parses the first block in the vec together with all of its children, returns position of the
-// next unhandled block
-fn assemble_blocks_rec(
-    pos: usize,
-    block_ranges_indent: &[(usize, usize, usize)],
-    text: &str,
-) -> Result<(ListElem, usize)> {
-    let (s, e, i) = block_ranges_indent[pos];
-    let block_text = &text[s..e];
-    let block_text = trim_like_first_line_plus(block_text, 2);
-    let mut first_block = parse_logseq_block(&block_text)?;
-    let mut pos = pos + 1;
-    let mut children = vec![];
-    while pos < block_ranges_indent.len() && block_ranges_indent[pos].2 > i {
-        let (child, new_pos) = assemble_blocks_rec(pos, block_ranges_indent, text)?;
-        children.push(child);
-        pos = new_pos;
-    }
-
-    /*Ok((
-        DocumentComponent::new_with_children(first_block, children),
-        pos,
-    ))*/
-    first_block.children = children;
-    Ok((first_block, pos))
-}
-
 fn construct_block_error_details(lexer: &Lexer<'_, LogSeqBlockToken>) -> String {
     let slice = lexer.slice().escape_default();
     let start = lexer.span().start;
     let text = lexer.source();
     let line = text[0..start].lines().count();
     format!("Encountered '{slice}' at {:?} (line {line});", lexer.span())
-}
-
-#[test]
-fn test_block_ranges() {
-    let text = "- 23\n   - 10";
-    let res = block_ranges(text);
-    assert_eq!(res, vec![(0, 5), (5, 12)])
 }
 
 #[test]
@@ -416,9 +365,6 @@ fn test_parse_properties() {
     let text = "- # Blog\n\t- template:: blog\n\t  tags:: [[blog]]\n\t  source::\n\t  description::\n\t  url::";
 
     let res = parse_logseq_text(text, &None).unwrap();
-    //let expected = ParsedDocument::ParsedText(vec![]);
-
-    //assert_eq!(res, expected);
     let res = res.to_logseq_text(&None);
     assert_eq!(res, text.replace("\t", "    "));
 }
@@ -447,19 +393,12 @@ fn test_parse_youtube_template() {
 
 #[test]
 fn test_comp_problem_template() {
-    let text = "- # CompProblem
-	- template:: computational_problem
-	  tags:: [[Computational Problem]]
-		- #+BEGIN_QUOTE
-		  **Definition**
-		  * *Input*: 
-		  * *Objective*:
-		  #+END_QUOTE";
+    let text = "- # CompProblem\n\t- template:: computational_problem\n\t  tags:: [[Computational Problem]]\n\t\t- #+BEGIN_QUOTE\n\t\t  **Definition**\n\t\t  * *Input*: \n\t\t  * *Objective*:\n\t\t  #+END_QUOTE";
     let res = parse_logseq_text(text, &None);
     debug!("{res:?}");
     assert_eq!(
-        text.replace("\t", "    "),
-        res.unwrap().to_logseq_text(&None)
+        res.unwrap().to_logseq_text(&None),
+        text.replace("\t", "    ")
     );
 }
 
@@ -467,6 +406,7 @@ fn test_comp_problem_template() {
 fn test_code_block() {
     let text = "```python\nres=set()\n```";
     let res = parse_logseq_text(text, &None).unwrap();
+    println!("{res:?}");
     let res = res.to_logseq_text(&None);
     let expected = "- ```python\n  res=set()\n  ```";
     assert_eq!(res, expected);

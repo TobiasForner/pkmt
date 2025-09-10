@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use regex::Captures;
 use tracing::{debug, instrument};
 
@@ -16,6 +16,10 @@ pub fn apply_substitutions(text: &str) -> String {
         .replace("’", "'")
         .replace("–", "-")
         .replace("“", "\"")
+}
+
+pub fn indent_spaces(line: &str) -> usize {
+    line.chars().take_while(|c| *c == ' ').count()
 }
 
 pub fn indent_level(line: &str) -> usize {

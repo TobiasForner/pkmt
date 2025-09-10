@@ -9,7 +9,10 @@ use tracing::{debug, instrument};
 
 use crate::{
     parse::{self, TextMode, parse_file},
-    util::{self, ends_with_blank_line, files_in_tree, starts_with_blank_line},
+    util::{
+        self, SPACES_PER_INDENT, ends_with_blank_line, files_in_tree, indent_spaces,
+        starts_with_blank_line, trim_like_first_line_plus,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -66,11 +69,30 @@ pub enum ParsedDocument {
 }
 
 impl ParsedDocument {
+    #[instrument]
     pub fn to_string(&self, outmode: TextMode, file_info: &Option<FileInfo>) -> String {
         use TextMode::*;
         match outmode {
             Obsidian => todo!("Conversion to Obsidian is not implemented yet!"),
-            LogSeq => self.to_logseq_text(file_info),
+            LogSeq => {
+                // TODO transform the parsed document
+                // A heading owns all subsequent parts until a heading of a lower level
+                /*let mut current_list_elements: Vec<ListElem> = vec![];
+                let comps = self.components().iter().map(|c| match c.element {
+                    DocumentElement::List(les, bool) => c,
+                    de => {
+                        if let Some(le) = current_list_elements.last() {
+                            if let Some(comp) = le.contents.components().last()
+                                && comp.should_have_own_block()
+                            {}
+                        }
+                    }
+                });*/
+
+                let res = self.to_logseq_text(file_info);
+                debug!("result: {res:?}");
+                res
+            }
             Zk => self.to_zk_text(file_info),
         }
     }
@@ -237,6 +259,7 @@ impl ParsedDocument {
                         res.push('\n');
                     }
                 }
+                let mut list_start_added = false;
                 text.lines().enumerate().for_each(|(index, line)| {
                     let mut line = line.to_string();
                     if index == 0 {
@@ -252,11 +275,16 @@ impl ParsedDocument {
                             || line.starts_with("- "))
                         {
                             line = format!("- {line}");
+                            list_start_added = true;
                             //res.push_str("- ");
                         }
                     } else {
                         res.push('\n');
                         res.push_str(&indent);
+                        if list_start_added {
+                            // to account for the list start of the first line
+                            res.push_str("  ");
+                        }
                     }
                     debug!("removing trailing blank lines from {res:?}");
                     // remove empty lines at the end of a block
@@ -554,19 +582,39 @@ impl ListElem {
             TextMode::Zk => self.contents.to_zk_text(file_info),
             _ => todo!(),
         };
+        println!("parsed contents: {:?}", self.contents);
+        let contents = trim_like_first_line_plus(&contents, 2);
+        println!("converted contents: {contents:?}");
         let mut res = String::new();
+        let mut list_start_added = false;
         contents.lines().enumerate().for_each(|(i, l)| {
+            println!("{i}, {l:?}");
             if i > 0 {
                 res.push('\n');
             }
-            (0..indent_level).for_each(|_| res.push_str("    "));
+
             if i == 0 {
                 if !l.starts_with("- ") {
+                    // TODO: remove indents after list start
+                    let required_indents = indent_level * SPACES_PER_INDENT;
+                    debug!("missing indents: {required_indents} for line {l:?}");
+                    (0..required_indents).for_each(|_| res.push(' '));
                     res.push_str("- ");
+                    list_start_added = true;
+                } else {
+                    let ind_spaces = indent_spaces(l);
+                    let required_indents = indent_level * SPACES_PER_INDENT;
+                    let missing_indents = required_indents.saturating_sub(ind_spaces);
+                    debug!("missing indents: {missing_indents} for line {l:?}");
+                    (0..missing_indents).for_each(|_| res.push(' '));
                 }
             } else {
+                let ind_spaces = indent_spaces(l);
                 // indent to compensate for '- ' prefix of first line of this list element
-                res.push_str("  ");
+                let required_indents = indent_level * SPACES_PER_INDENT + 2;
+                let missing_indents = required_indents.saturating_sub(ind_spaces);
+                debug!("missing indents: {missing_indents} for line {l:?}");
+                (0..missing_indents).for_each(|_| res.push(' '));
             }
             res.push_str(l);
         });
@@ -1101,7 +1149,7 @@ impl DocumentComponent {
     /// converts the component to logseq text
     /// If given, file_info is used to update image embeds
     fn to_logseq_text(&self, file_info: &Option<FileInfo>) -> String {
-        let res = [self.element.to_logseq_text(file_info)]
+        [self.element.to_logseq_text(file_info)]
             .into_iter()
             .chain(self.children.iter().map(|c| {
                 let mut res = String::new();
@@ -1111,8 +1159,7 @@ impl DocumentComponent {
                 });
                 res
             }))
-            .collect();
-        res
+            .collect()
     }
     #[instrument]
     fn to_zk_text(&self, file_info: &Option<FileInfo>) -> String {
@@ -1397,8 +1444,15 @@ fn test_text_parsed_doc_to_logseq() {
 fn test_list_element_to_logseq() {
     let text = "line 1\nline 2".to_string();
     let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new_text(&text)]);
-    let le = DocumentElement::ListElement(pd, vec![]);
-    let res = le.to_logseq_text(&None);
+    let list = DocumentElement::List(
+        vec![ListElem {
+            contents: pd,
+            children: vec![],
+        }],
+        false,
+    );
+    //let le = DocumentElement::ListElement(pd, vec![]);
+    let res = list.to_logseq_text(&None);
 
     assert_eq!(res, format!("- line 1\n  line 2"));
 

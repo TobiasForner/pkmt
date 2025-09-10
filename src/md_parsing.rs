@@ -77,6 +77,8 @@ enum MdToken {
     Text,
     #[token("\\")]
     Backslash,
+    #[regex(r"[^\u0000-\u007F]+")]
+    Unicode,
 }
 
 impl MdToken {
@@ -244,7 +246,7 @@ fn parse_list(lexer: &mut Lexer<'_, MdToken>, indent_spaces: usize) -> Result<Md
     debug!("list text: {text:?}");
     // indent_spaces, le
     let mut list_elements = vec![(indent_spaces, ListElement::new())];
-    text.lines().for_each(|l| {
+    text.lines().enumerate().for_each(|(i, l)| {
         // valid list starts are either '- ' or just '-' if there is nothing after it in the
         // current line
         if let Some((indents, text)) = l.split_once("- ").or_else(|| {
@@ -257,14 +259,15 @@ fn parse_list(lexer: &mut Lexer<'_, MdToken>, indent_spaces: usize) -> Result<Md
             }
         }) {
             let indent_spaces = indents.replace("\t", "    ").len();
-            let mut le = ListElement::new();
-            le.text = text.to_string();
+            let le = ListElement::new_text(text.to_string());
             list_elements.push((indent_spaces, le));
         } else if let Some((_, le)) = list_elements.last_mut() {
+            if i > 0 {
+                le.text.push('\n');
+            }
             le.text.push_str(l);
         } else {
-            let mut le = ListElement::new();
-            le.text = l.to_string();
+            let le = ListElement::new_text(l.to_string());
             list_elements.push((indent_spaces, le));
         }
     });
@@ -373,4 +376,15 @@ fn test_involved_list() {
         MdComponent::Text("some text".to_string()),
     ];
     assert_eq!(result, expected);
+}
+
+#[test]
+fn test_multiline_list_element() {
+    let text = "- a\n  b";
+    let result = parse_md_text(text).unwrap();
+    let expected = vec![MdComponent::List(
+        vec![ListElement::new_text("a\n  b".to_string())],
+        false,
+    )];
+    assert_eq!(result, expected)
 }
