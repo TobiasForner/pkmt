@@ -251,13 +251,14 @@ fn parse_list(lexer: &mut Lexer<'_, MdToken>, indent_spaces: usize) -> Result<Md
         // current line
         if let Some((indents, text)) = l.split_once("- ").or_else(|| {
             if let Some((indents, rest)) = l.split_once('-')
-                && rest.is_empty()
+                && (rest.is_empty() || rest.starts_with('\n'))
             {
                 Some((indents, rest))
             } else {
                 None
             }
-        }) {
+        }) && indents.trim().is_empty()
+        {
             let indent_spaces = indents.replace("\t", "    ").len();
             let le = ListElement::new_text(text.to_string());
             list_elements.push((indent_spaces, le));
@@ -384,6 +385,20 @@ fn test_multiline_list_element() {
     let result = parse_md_text(text).unwrap();
     let expected = vec![MdComponent::List(
         vec![ListElement::new_text("a\n  b".to_string())],
+        false,
+    )];
+    assert_eq!(result, expected)
+}
+
+#[test]
+fn test_list_with_dash() {
+    let text = "- a - b\n- c";
+    let result = parse_md_text(text).unwrap();
+    let expected = vec![MdComponent::List(
+        vec![
+            ListElement::new_text("a - b".to_string()),
+            ListElement::new_text("c".to_string()),
+        ],
         false,
     )];
     assert_eq!(result, expected)
