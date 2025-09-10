@@ -4,12 +4,12 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
 
 use crate::{
-    parse::{self, parse_file, TextMode},
-    util::{self, ends_with_blank_line, files_in_tree, indent_level, starts_with_blank_line},
+    parse::{self, TextMode, parse_file},
+    util::{self, ends_with_blank_line, files_in_tree, starts_with_blank_line},
 };
 
 #[derive(Clone, Debug)]
@@ -52,7 +52,9 @@ impl FileInfo {
                 destination_file,
                 image_dirs: None,
             }),
-            _=>bail!("Image input directory and image output directory need to be either both set or unset, but got mixture!")
+            _ => bail!(
+                "Image input directory and image output directory need to be either both set or unset, but got mixture!"
+            ),
         }
     }
 }
@@ -230,10 +232,10 @@ impl ParsedDocument {
                     if let Some((_, rest)) = res.rsplit_once("")
                         && !rest.trim().is_empty()
                     {
-
-                    res.push('\n');
+                        res.push('\n');
+                    } else {
+                        res.push('\n');
                     }
-                    else{res.push('\n');}
                 }
                 text.lines().enumerate().for_each(|(index, line)| {
                     let mut line = line.to_string();
@@ -249,7 +251,7 @@ impl ParsedDocument {
                             || t == "-"
                             || line.starts_with("- "))
                         {
-                           line = format!("- {line}");
+                            line = format!("- {line}");
                             //res.push_str("- ");
                         }
                     } else {
@@ -283,8 +285,7 @@ impl ParsedDocument {
             }
             new_block = c.should_have_own_block();
         });
-        let res = res.trim_end().to_string();
-        res
+        res.trim_end().to_string()
     }
 
     pub fn collapse_text(&self) -> Self {
@@ -318,23 +319,21 @@ impl MentionedFile {
                         }
                     }
                 };
-                if let Some(file_info) = file_info {
-                    if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
-                        if let Some((name, ext)) = file_name.rsplit_once('.') {
-                            if ["png", "jpeg"].contains(&ext) {
-                                debug!("image: {file_name}: {file_info:?}");
-                                let dest_dir = dest_file.parent().unwrap();
-                                let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
-                                if let Some(rel) = rel {
-                                    return format!(
-                                        "![{name}.{ext}]({})",
-                                        rel.to_string_lossy().replace("\\", "/")
-                                    );
-                                } else {
-                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
-                                }
-                            }
-                        }
+                if let Some(file_info) = file_info
+                    && let Some((_, dest_file, _, image_out)) = file_info.get_all()
+                    && let Some((name, ext)) = file_name.rsplit_once('.')
+                    && ["png", "jpeg"].contains(&ext)
+                {
+                    debug!("image: {file_name}: {file_info:?}");
+                    let dest_dir = dest_file.parent().unwrap();
+                    let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
+                    if let Some(rel) = rel {
+                        return format!(
+                            "![{name}.{ext}]({})",
+                            rel.to_string_lossy().replace("\\", "/")
+                        );
+                    } else {
+                        debug!("{image_out:?} and {dest_file:?} don't share a path!")
                     }
                 }
 

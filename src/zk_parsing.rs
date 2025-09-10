@@ -13,11 +13,11 @@ use crate::{
         trim_like_first_line_plus,
     },
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
 
 use crate::document_component::{
-    collapse_text, DocumentComponent, DocumentElement, MentionedFile, ParsedDocument,
+    DocumentComponent, DocumentElement, MentionedFile, ParsedDocument, collapse_text,
 };
 use logos::{Lexer, Logos};
 
@@ -210,7 +210,11 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             let name = c.get(1).map(|name| name.as_str().to_string());
                             let Some(path) = c.get(2) else { panic!("") };
                             let path = PathBuf::from_str(path.as_str())?;
-                            debug!("Got name {name:?} ({:?}) and path {path:?} (regex: {file_link_re:?} ;;; pattern: {})", c.get(1), file_link_re.as_str());
+                            debug!(
+                                "Got name {name:?} ({:?}) and path {path:?} (regex: {file_link_re:?} ;;; pattern: {})",
+                                c.get(1),
+                                file_link_re.as_str()
+                            );
 
                             let mf = if path.exists() {
                                 MentionedFile::FilePath(path)
@@ -228,7 +232,10 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                             // closing paranthesis
                             while let Some(token) = lexer.next() {
                                 if token.is_err() {
-                                    bail!("Failed to consume tokens corresponding to file link. Encountered {:?}", construct_error_details(&lexer))
+                                    bail!(
+                                        "Failed to consume tokens corresponding to file link. Encountered {:?}",
+                                        construct_error_details(&lexer)
+                                    )
                                 };
                                 let slice = lexer.slice();
                                 if slice.ends_with(')') {
@@ -343,7 +350,9 @@ fn parse_property(
                     prop_val_text.push_str(txt.trim_end());
                     break;
                 } else if txt.contains('\n') {
-                    bail!("parse property: encountered newline in the middle of slice {txt:?} for token {other:?}!")
+                    bail!(
+                        "parse property: encountered newline in the middle of slice {txt:?} for token {other:?}!"
+                    )
                 } else {
                     prop_val_text.push_str(txt);
                 }
@@ -374,10 +383,10 @@ fn parse_property(
                     parenthesis_stack.push(']');
                 } else if c == '{' {
                     parenthesis_stack.push('}');
-                } else if let Some(ch) = parenthesis_stack.last() {
-                    if *ch == c {
-                        parenthesis_stack.pop();
-                    }
+                } else if let Some(ch) = parenthesis_stack.last()
+                    && *ch == c
+                {
+                    parenthesis_stack.pop();
                 }
             }
         });
@@ -658,7 +667,9 @@ fn parse_heading(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentElement> {
                     debug!("result: {res:?}");
                     return res;
                 } else if txt.contains('\n') {
-                    bail!("parse heading: encountered newline in the middle of slice {txt:?} for token {other:?}!")
+                    bail!(
+                        "parse heading: encountered newline in the middle of slice {txt:?} for token {other:?}!"
+                    )
                 } else {
                     text.push_str(txt);
                 }
