@@ -315,14 +315,6 @@ impl ParsedDocument {
         });
         res.trim_end().to_string()
     }
-
-    pub fn collapse_text(&self) -> Self {
-        use ParsedDocument::*;
-        match self {
-            ParsedFile(comps, path) => ParsedFile(collapse_text(comps), path.to_path_buf()),
-            ParsedText(comps) => ParsedText(collapse_text(comps)),
-        }
-    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

@@ -69,6 +69,7 @@ pub fn parse_obsidian_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocumen
     let pt = parse_obsidian_text(&text, &Some(file_dir))?;
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
+
 #[instrument]
 pub fn parse_obsidian_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     let parsed_md = parse_md_text(text).context("Failed to parse md")?;

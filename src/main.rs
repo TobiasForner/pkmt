@@ -226,7 +226,7 @@ fn run() -> Result<()> {
         }
         Some(Commands::Test {}) => {
             println!("Only prints this message atm");
-            md_parsing::parse_md_text("test");
+            md_parsing::parse_md_text("test")?;
             Ok(())
         }
         Some(Commands::Convert {
