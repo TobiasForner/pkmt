@@ -198,12 +198,12 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
                             if list_elements.len() == 1 {
                                 rec_components = list_elements[0].contents.components().to_vec();
                             }
-                        } else if let DocumentElement::ListElement(pd, props) =
-                            &rec_components[0].element
-                            && props.is_empty()
+                        } /*else if let DocumentElement::ListElement(pd, props) =
+                        &rec_components[0].element
+                        && props.is_empty()
                         {
-                            rec_components = pd.clone().into_components();
-                        }
+                        rec_components = pd.clone().into_components();
+                        }*/
                     };
 
                     components.push(DocumentComponent::new(DocumentElement::Admonition(

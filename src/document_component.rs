@@ -133,6 +133,36 @@ impl ParsedDocument {
         None
     }
 
+    pub fn get_list_elem(&self, selector: &dyn Fn(&ListElem) -> bool) -> Option<ListElem> {
+        for comp in self.components() {
+            let rec = comp.get_list_elem(selector);
+            if rec.is_some() {
+                return rec;
+            }
+        }
+
+        None
+    }
+
+    pub fn get_list_elem_mut(
+        &mut self,
+        selector: &dyn Fn(&ListElem) -> bool,
+    ) -> Option<&mut ListElem> {
+        use ParsedDocument::*;
+        let comps = match self {
+            ParsedFile(comps, _) => comps,
+            ParsedText(comps) => comps,
+        };
+        for comp in comps {
+            let rec = comp.get_list_elem_mut(selector);
+            if rec.is_some() {
+                return rec;
+            }
+        }
+
+        None
+    }
+
     pub fn get_all_document_components(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
@@ -497,7 +527,7 @@ impl Property {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PropValue {
     String(String),
-    // mentioned_file, optional section, optional rename
+    /// mentioned_file, optional section, optional rename
     FileLink(MentionedFile, Option<String>, Option<String>),
 }
 
@@ -622,6 +652,78 @@ impl ListElem {
         res
     }
 
+    pub fn get_document_component(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<DocumentComponent> {
+        self.contents.get_document_component(selector).or_else(|| {
+            let tmp = self
+                .children
+                .iter()
+                .map(|le| le.get_document_component(selector))
+                .find(|c| c.is_some())
+                .flatten();
+            tmp
+        })
+    }
+    pub fn get_list_elem(&self, selector: &dyn Fn(&ListElem) -> bool) -> Option<ListElem> {
+        if selector(self) {
+            Some(self.clone())
+        } else {
+            self.children
+                .iter()
+                .map(|le| le.get_list_elem(selector))
+                .find(|c| c.is_some())
+                .flatten()
+        }
+    }
+
+    pub fn get_list_elem_mut(
+        &mut self,
+        selector: &dyn Fn(&ListElem) -> bool,
+    ) -> Option<&mut ListElem> {
+        if selector(self) {
+            Some(self)
+        } else {
+            self.children
+                .iter_mut()
+                .map(|le| le.get_list_elem_mut(selector))
+                .find(|c| c.is_some())
+                .flatten()
+        }
+    }
+
+    pub fn get_all_document_components(
+        &self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<DocumentComponent> {
+        let mut res = self.contents.get_all_document_components(selector);
+        let mut rec = self
+            .children
+            .iter()
+            .flat_map(|c| c.get_all_document_components(selector).into_iter())
+            .collect();
+        res.append(&mut rec);
+        res
+    }
+
+    pub fn get_document_component_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Option<&mut DocumentComponent> {
+        self.contents
+            .get_document_component_mut(selector)
+            .or_else(|| {
+                let tmp = self
+                    .children
+                    .iter_mut()
+                    .map(|le| le.get_document_component_mut(selector))
+                    .find(|c| c.is_some())
+                    .flatten();
+                tmp
+            })
+    }
+
     fn collapse_text(&self) -> Self {
         let contents = ParsedDocument::ParsedText(collapse_text(self.contents.components()));
         let mut res = ListElem::new(contents);
@@ -644,7 +746,7 @@ pub enum DocumentElement {
     CodeBlock(String, Option<String>),
 
     /// list item, map stores additional properties
-    ListElement(ParsedDocument, Vec<(String, String)>),
+    //ListElement(ParsedDocument, Vec<(String, String)>),
     /// list_elems, terminated by blank line
     List(Vec<ListElem>, bool),
 
@@ -785,7 +887,7 @@ impl DocumentElement {
                 res.push_str("```");
                 res
             }
-            ListElement(pd, properties) => {
+            /*ListElement(pd, properties) => {
                 let text = pd.to_logseq_text(file_info);
                 let mut res = String::new();
                 if !properties.is_empty() {
@@ -818,7 +920,7 @@ impl DocumentElement {
                     res.push('-')
                 }
                 res
-            }
+            }*/
             List(list_elems, _) => list_elems
                 .iter()
                 .map(|le| le.to_mode_text(&TextMode::LogSeq, file_info, 0))
@@ -967,42 +1069,6 @@ impl DocumentElement {
                 res.push_str("```");
                 res
             }
-            ListElement(pd, properties) => {
-                let text = pd.to_zk_text(file_info);
-                debug!("{self:?}: inner converted to '{text:?}'.");
-                let text = text.trim_start();
-                let mut res = String::new();
-                if !properties.is_empty() {
-                    properties
-                        .iter()
-                        .enumerate()
-                        .for_each(|(index, (key, value))| {
-                            let line = if value.is_empty() {
-                                format!("{key} ::=")
-                            } else {
-                                format!("{key} ::= {value}")
-                            };
-                            if index > 0 {
-                                res.push_str("\n  ");
-                            } else {
-                                res.push_str("- ");
-                            }
-                            res.push_str(&line);
-                        });
-                }
-                text.lines().enumerate().for_each(|(i, l)| {
-                    if res.is_empty() && i == 0 && !l.trim().starts_with("- ") {
-                        res.push_str("- ");
-                    } else if i > 0 {
-                        res.push_str("\n  ");
-                    }
-                    res.push_str(l);
-                });
-                if res.is_empty() {
-                    res.push('-')
-                }
-                res
-            }
             List(list_elems, terminated_by_blank_line) => {
                 let mut res = list_elems
                     .iter()
@@ -1031,7 +1097,11 @@ impl DocumentElement {
         use DocumentElement::*;
         match self {
             Admonition(comps, _) => comps.iter().find(|c| selector(c)).cloned(),
-            ListElement(pd, _) => pd.get_document_component(selector),
+            List(list_elements, _) => list_elements
+                .iter()
+                .map(|le| le.get_document_component(selector))
+                .find(|c| c.is_some())
+                .flatten(),
             _ => None,
         }
     }
@@ -1042,7 +1112,12 @@ impl DocumentElement {
         use DocumentElement::*;
         match self {
             Admonition(comps, _) => comps.iter().filter(|c| selector(c)).cloned().collect(),
-            ListElement(pd, _) => pd.get_all_document_components(selector),
+            //ListElement(pd, _) => pd.get_all_document_components(selector),
+            List(list_elements, _) => list_elements
+                .iter()
+                .flat_map(|le| le.get_all_document_components(selector).into_iter())
+                .collect(),
+
             _ => vec![],
         }
     }
@@ -1054,7 +1129,12 @@ impl DocumentElement {
         use DocumentElement::*;
         match self {
             Admonition(comps, _) => comps.iter_mut().find(|c| selector(c)),
-            ListElement(pd, _) => pd.get_document_component_mut(selector),
+            //ListElement(pd, _) => pd.get_document_component_mut(selector),
+            List(list_elements, _) => list_elements
+                .iter_mut()
+                .map(|le| le.get_document_component_mut(selector))
+                .find(|c| c.is_some())
+                .flatten(),
             _ => None,
         }
     }
@@ -1068,7 +1148,7 @@ impl DocumentElement {
             Admonition(_, _) => true,
             FileEmbed(_, _) => true,
             FileLink(_, _, _) => false,
-            ListElement(_, _) => true,
+            //ListElement(_, _) => true,
             CodeBlock(_, _) => true,
             Properties(_) => true,
             List(_, _) => true,
@@ -1181,13 +1261,18 @@ impl DocumentComponent {
     pub fn is_empty_lines(&self) -> bool {
         self.element.is_empty_lines()
     }
+
     pub fn is_empty_list(&self) -> bool {
         let element_empty = match &self.element {
-            DocumentElement::ListElement(pd, props) => {
-                pd.components().is_empty() && props.is_empty()
+            DocumentElement::List(list_elements, _) => {
+                list_elements
+                    .iter()
+                    .all(|le| le.contents.components().is_empty() && le.children.is_empty())
+                //pd.components().is_empty() && props.is_empty()
             }
             _ => false,
         };
+
         element_empty && self.children.is_empty()
     }
     pub fn new(element: DocumentElement) -> Self {
@@ -1265,6 +1350,45 @@ impl DocumentComponent {
         }
 
         None
+    }
+
+    pub fn get_list_elem(&self, selector: &dyn Fn(&ListElem) -> bool) -> Option<ListElem> {
+        match &self.element {
+            DocumentElement::List(list_elements, _) => list_elements
+                .iter()
+                .map(|le| le.get_list_elem(selector))
+                .find(|le| le.is_some())
+                .flatten(),
+            _ => None,
+        }
+        .or_else(|| {
+            self.children
+                .iter()
+                .map(|c| c.get_list_elem(selector))
+                .find(|c| c.is_some())
+                .flatten()
+        })
+    }
+
+    pub fn get_list_elem_mut(
+        &mut self,
+        selector: &dyn Fn(&ListElem) -> bool,
+    ) -> Option<&mut ListElem> {
+        match &mut self.element {
+            DocumentElement::List(list_elements, _) => list_elements
+                .iter_mut()
+                .map(|le| le.get_list_elem_mut(selector))
+                .find(|le| le.is_some())
+                .flatten(),
+            _ => None,
+        }
+        .or_else(|| {
+            self.children
+                .iter_mut()
+                .map(|c| c.get_list_elem_mut(selector))
+                .find(|c| c.is_some())
+                .flatten()
+        })
     }
 
     fn mentioned_files(&self) -> Vec<String> {
@@ -1369,7 +1493,7 @@ pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent>
                     children,
                 ));
             }
-            ListElement(pd, properties) => {
+            /*ListElement(pd, properties) => {
                 if !text.is_empty() {
                     res.push(DocumentComponent::new_text(&text));
                     text = String::new();
@@ -1381,7 +1505,7 @@ pub fn collapse_text(components: &[DocumentComponent]) -> Vec<DocumentComponent>
                     ListElement(ParsedDocument::ParsedText(comps), properties.clone()),
                     children,
                 ));
-            }
+            }*/
             List(list_elements, blank_line_after) => {
                 let elems = list_elements.iter().map(|le| le.collapse_text()).collect();
                 res.push(DocumentComponent::new(List(elems, *blank_line_after)));
@@ -1448,16 +1572,36 @@ fn test_list_element_to_logseq() {
 
     assert_eq!(res, format!("- line 1\n  line 2"));
 
-    let list_elem = DocumentElement::ListElement(
+    /*let list_elem = DocumentElement::ListElement(
         ParsedDocument::ParsedText(vec![]),
         vec![
             ("template".to_string(), "blog".to_string()),
             ("tags".to_string(), "[[blog]]".to_string()),
         ],
+    );*/
+    let list = DocumentElement::List(
+        vec![ListElem {
+            contents: ParsedDocument::ParsedText(vec![DocumentComponent::new(
+                DocumentElement::Properties(vec![
+                    Property::new(
+                        "template".to_string(),
+                        true,
+                        vec![PropValue::String("blog".to_string())],
+                    ),
+                    Property::new(
+                        "tags".to_string(),
+                        true,
+                        vec![PropValue::String("[[blog]]".to_string())],
+                    ),
+                ]),
+            )]),
+            children: vec![],
+        }],
+        false,
     );
 
     assert_eq!(
-        list_elem.to_logseq_text(&None),
+        list.to_logseq_text(&None),
         "- template:: blog\n  tags:: [[blog]]".to_string()
     );
 }
@@ -1474,10 +1618,13 @@ fn test_comp_text_element_to_logseq() {
 
 #[test]
 fn test_almost_empty_pd_to_logseq() {
-    use DocumentElement::ListElement;
-    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new(ListElement(
-        ParsedDocument::ParsedText(vec![]),
-        vec![],
+    //use DocumentElement::ListElement;
+    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::new(DocumentElement::List(
+        vec![ListElem {
+            contents: ParsedDocument::ParsedText(vec![]),
+            children: vec![],
+        }],
+        false,
     ))]);
     let expected = "-";
     assert_eq!(pd.to_logseq_text(&None), expected);

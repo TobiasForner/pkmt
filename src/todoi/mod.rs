@@ -13,17 +13,18 @@ use std::{
 };
 use test_log::test;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use interactive::get_interactive_data;
 use regex::Regex;
 use tracing::{debug, info, instrument};
 
 use crate::{
     document_component::{
-        DocumentComponent, DocumentElement, FileInfo, MentionedFile, ParsedDocument, PropValue,
+        DocumentComponent, DocumentElement, FileInfo, ListElem, MentionedFile, ParsedDocument,
+        PropValue, Property,
     },
     logseq_parsing::parse_logseq_file,
-    parse::{parse_all_files_in_dir, parse_file, TextMode},
+    parse::{TextMode, parse_all_files_in_dir, parse_file},
     todoi::{
         config::Config,
         interactive::Resolution,
@@ -50,37 +51,59 @@ impl LogSeqTemplates {
         Ok(Self { templates_pd: pd })
     }
 
-    pub fn get_template_comp(&self, template_name: &str) -> Option<DocumentComponent> {
-        use crate::document_component::DocumentElement::ListElement;
-        self.templates_pd
-            .get_document_component(&|c| match &c.element {
-                ListElement(_, props) => props
-                    .iter()
-                    .any(|(key, value)| key == "template" && value == template_name),
-                _ => false,
-            })
+    /// returns the list element containing the properties matching the template name
+    pub fn get_template_comp(&self, template_name: &str) -> Option<ListElem> {
+        get_list_elem_with_doc_elem(&self.templates_pd, &|elem| match elem {
+            DocumentElement::Properties(props) => props.iter().any(|p| {
+                p.has_name("template") && p.has_value(&PropValue::String(template_name.to_string()))
+            }),
+            _ => false,
+        })
     }
 
     pub fn template_names(&self) -> Vec<String> {
-        use crate::document_component::DocumentElement::ListElement;
         let mut res = vec![];
-        let template_comps = self.templates_pd.get_all_document_components(&|c| {
-            if let ListElement(_, props) = &c.element {
-                props.iter().any(|(key, _)| key == "template")
-            } else {
-                false
-            }
-        });
-        template_comps.iter().for_each(|c| {
-            if let ListElement(_, props) = &c.element {
-                if let Some((_, value)) = props.iter().find(|(key, _)| key == "template") {
-                    res.push(value.clone());
+        self.templates_pd
+            .get_all_document_components(&|c: &DocumentComponent| match &c.element {
+                DocumentElement::Properties(props) => props.iter().any(|p| p.has_name("template")),
+                _ => false,
+            })
+            .iter()
+            .for_each(|c| match &c.element {
+                DocumentElement::Properties(props) => {
+                    if let Some(p) = props.iter().find(|p| p.has_name("template")) {
+                        p.values.iter().for_each(|v| {
+                            let tm = match v {
+                                PropValue::FileLink(mf, _, _) => mf.to_string(),
+                                PropValue::String(text) => text.to_string(),
+                            };
+                            res.push(tm);
+                        });
+                    }
                 }
-            }
-        });
-
+                _ => {}
+            });
         res
     }
+}
+
+fn get_list_elem_with_doc_elem(
+    pd: &ParsedDocument,
+    elem_selector: &dyn Fn(&DocumentElement) -> bool,
+) -> Option<ListElem> {
+    pd.get_list_elem(&|le| {
+        le.contents
+            .components()
+            .iter()
+            .any(|dc| elem_selector(&dc.element))
+    })
+}
+fn fill_props(props: &mut Vec<Property>, prop_name: &str, values: &[PropValue]) {
+    props.iter_mut().for_each(|p| {
+        if p.has_name(prop_name) {
+            p.add_values(values);
+        }
+    });
 }
 
 /// gathers tasks and calls the correct handler
@@ -502,9 +525,9 @@ impl TaskDataHandler for ZkHandler {
                 None,
                 Some(title),
             ));
-            let journal_mention = DocumentComponent::new(DocumentElement::ListElement(
-                ParsedDocument::ParsedText(vec![mention]),
-                vec![],
+            let journal_mention = DocumentComponent::new(DocumentElement::List(
+                vec![ListElem::new(ParsedDocument::ParsedText(vec![mention]))],
+                false,
             ));
             let success = self.append_to_zk_journal(journal_mention)?;
             Ok(success)
@@ -515,7 +538,6 @@ impl TaskDataHandler for ZkHandler {
     }
 
     fn get_template_names(&self) -> Result<Vec<String>> {
-        // TODO: remove unwraps
         let p = self.root_dir.join(".zk/templates");
         let dir_entries: Vec<DirEntry> = p
             .read_dir()?
@@ -532,13 +554,11 @@ impl TaskDataHandler for ZkHandler {
                             std::result::Result::Err(s) => bail!("{s:?}"),
                         };
                         tmp.map(Some)
-                        //let tmp: Result<String> = f.file_name().into_string();
-                        //Ok(Some(name))
                     } else {
                         Ok(None)
                     }
                 }
-                _ => bail!(""),
+                _ => bail!("All direcory entries should have a file type"),
             })
             .collect();
         let res: Vec<String> = res?.into_iter().flatten().collect();
@@ -553,6 +573,26 @@ fn add_to_logseq(
 ) -> Result<Vec<TodoistTask>> {
     let mut logseq_handler = LogSeqHandler::new(logseq_graph_root)?;
     handle_tasks(inbox_tasks, &mut logseq_handler, config)
+}
+/// Adds the the given values to the first property in the pd with the given name. Does nothing if the property
+/// is not found
+#[instrument]
+fn fill_all_props_le(pd: &mut ListElem, properties: &[(&str, Vec<PropValue>)]) {
+    properties.iter().for_each(|(prop_name, values)| {
+        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
+            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+            _ => false,
+        });
+        if let Some(prop) = property {
+            if let DocumentElement::Properties(props) = prop.get_element_mut() {
+                props.iter_mut().for_each(|p| {
+                    if p.has_name(prop_name) {
+                        p.add_values(values);
+                    }
+                });
+            }
+        }
+    });
 }
 
 fn get_task_data_non_interactive(
@@ -626,67 +666,89 @@ impl LogSeqHandler {
 
 impl TaskDataHandler for LogSeqHandler {
     fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
-        use crate::document_component::DocumentElement::ListElement;
         use TaskData::*;
         match task_data {
             Youtube(url, title, channel, tags) => {
+                // retrieve the youtube template frmo the templates file
+                // then fill in the properties
+                // then add a child list item with the youtube embed (or fall back to simply adding
+                // a yt link)
                 let mut yt_template = self
                     .templates
                     .get_template_comp("youtube")
                     .expect("No youtube template!")
                     .clone();
-                if let ListElement(_, props) = yt_template.get_element_mut() {
-                    let mut add = vec![];
-                    add.push(("authors", vec![format!("[[{}]]", channel)]));
-                    add.push(("description", vec![title.clone()]));
-                    add.push(("tags", tags.clone()));
-                    *props = fill_properties(props, &add, &["template"]);
+                let yt_props = yt_template
+                    .get_document_component_mut(&|dc| match &dc.element {
+                        DocumentElement::Properties(_) => true,
+                        _ => false,
+                    })
+                    .context("Youtube template must contain properties")?;
 
-                    // add embed
-                    let embed_block = yt_template
-                        .get_nth_child_mut(0)
-                        .unwrap()
-                        .get_nth_child_mut(0)
-                        .unwrap();
-
-                    let embed = if url.contains("/shorts/") {
-                        DocumentComponent::new_text(url)
-                    } else {
-                        DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
-                    };
-                    let pd = ParsedDocument::ParsedText(vec![embed]);
-                    let elem = ListElement(pd, vec![]);
-                    embed_block.element = elem;
+                if let DocumentElement::Properties(props) = yt_props.get_element_mut() {
+                    fill_props(
+                        props,
+                        "authors",
+                        &[PropValue::FileLink(
+                            MentionedFile::FileName(channel.to_string()),
+                            None,
+                            None,
+                        )],
+                    );
+                    fill_props(props, "description", &[PropValue::String(title.clone())]);
+                    let tags: Vec<PropValue> = tags
+                        .iter()
+                        .map(|t| PropValue::String(t.to_string()))
+                        .collect();
+                    fill_props(props, "description", &tags);
                 }
-                self.todays_journal.add_component(yt_template);
+
+                // embed child
+                if let Some(le) = yt_template.children.get_mut(0) {
+                    if let Some(le) = le.children.get_mut(0) {
+                        let embed = if url.contains("/shorts/") {
+                            DocumentComponent::new_text(url)
+                        } else {
+                            DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
+                        };
+                        le.contents.add_component(embed);
+                    }
+                }
+                let yt_block =
+                    DocumentComponent::new(DocumentElement::List(vec![yt_template], false));
+                self.todays_journal.add_component(yt_block);
             }
             TaskData::Sbs(url, author, title, tags, description) => {
                 if let Some(comp) = self.templates.get_template_comp("article") {
                     let mut comp = comp.clone();
-                    if let ListElement(_, props) = comp.get_element_mut() {
-                        let mut source = vec!["[[Stronger by Science]]".to_string()];
-                        if let Some(author) = author {
-                            source.push(author.clone());
-                        }
-                        let url = vec![url.clone()];
-
-                        let mut desc = vec![];
-                        if let Some(description) = description {
-                            desc.push(description.to_string());
-                        }
-
-                        let mut add: Vec<(&str, Vec<String>)> = vec![
-                            ("source", source),
-                            ("url", url),
-                            ("tags", tags.clone()),
-                            ("description", desc),
-                        ];
-                        if let Some(title) = title {
-                            add.push(("description", vec![title.clone()]));
-                        }
-                        *props = fill_properties(props, &add, &["template"]);
-                        self.todays_journal.add_component(comp);
+                    let mut source = vec![PropValue::String("[[Stronger by Science]]".to_string())];
+                    if let Some(author) = author {
+                        source.push(PropValue::String(author.clone()));
                     }
+                    let url = vec![PropValue::String(url.clone())];
+
+                    let mut desc = vec![];
+                    if let Some(description) = description {
+                        desc.push(PropValue::String(description.to_string()));
+                    }
+
+                    let mut properties: Vec<(&str, Vec<PropValue>)> = vec![
+                        ("source", source),
+                        ("url", url),
+                        (
+                            "tags",
+                            tags.iter()
+                                .map(|t| PropValue::String(t.to_string()))
+                                .collect(),
+                        ),
+                        ("description", desc),
+                    ];
+                    if let Some(title) = title {
+                        properties.push(("description", vec![PropValue::String(title.clone())]));
+                    }
+                    fill_all_props_le(&mut comp, &properties);
+                    let comp = DocumentComponent::new(DocumentElement::List(vec![comp], false));
+                    self.todays_journal.add_component(comp);
                 }
             }
             TaskData::YtPlaylist(url, channel, title) => {
@@ -694,36 +756,44 @@ impl TaskDataHandler for LogSeqHandler {
                     .templates
                     .get_template_comp("youtube_playlist")
                     .unwrap();
-                if let ListElement(_, props) = temp.get_element_mut() {
-                    *props = fill_properties(
-                        props,
-                        &[
-                            ("description", vec![title.to_string()]),
-                            ("authors", vec![format!("[[{channel}]]")]),
-                            ("url", vec![url.to_string()]),
-                        ],
-                        &["template"],
-                    );
-                    self.todays_journal.add_component(temp);
-                }
+                let properties = &[
+                    ("description", vec![PropValue::String(title.to_string())]),
+                    ("authors", vec![PropValue::String(format!("[[{channel}]]"))]),
+                    ("url", vec![PropValue::String(url.to_string())]),
+                ];
+                fill_all_props_le(&mut temp, properties);
+                let list = DocumentComponent::new(DocumentElement::List(vec![temp], false));
+                self.todays_journal.add_component(list);
             }
             TaskData::Interactive(template_name, url, title, tags, sources) => {
                 let mut comp = self.templates.get_template_comp(template_name).unwrap();
-                if let ListElement(_, props) = comp.get_element_mut() {
-                    let mut add = vec![];
-                    if let Some(title) = title {
-                        add.push(("description", vec![title.clone()]));
-                    }
-                    add.push(("tags", tags.clone()));
-                    if let Some(url) = url {
-                        add.push(("url", vec![url.clone()]))
-                    }
-
-                    add.push(("source", sources.clone()));
-                    let new_props = fill_properties(props, &add, &["template"]);
-                    *props = new_props;
-                    self.todays_journal.add_component(comp);
+                let mut add = vec![];
+                if let Some(title) = title {
+                    add.push(("description", vec![title.clone()]));
                 }
+                add.push(("tags", tags.clone()));
+
+                let mut properties: Vec<(&str, Vec<PropValue>)> = vec![
+                    (
+                        "source",
+                        sources
+                            .iter()
+                            .map(|s| PropValue::String(s.to_string()))
+                            .collect(),
+                    ),
+                    (
+                        "tags",
+                        tags.iter()
+                            .map(|t| PropValue::String(t.to_string()))
+                            .collect(),
+                    ),
+                ];
+                if let Some(url) = url {
+                    properties.push(("url", vec![PropValue::String(url.to_string())]))
+                }
+                fill_all_props_le(&mut comp, &properties);
+                let list = DocumentComponent::new(DocumentElement::List(vec![comp], false));
+                self.todays_journal.add_component(list);
             }
             _ => {
                 return Ok(false);
