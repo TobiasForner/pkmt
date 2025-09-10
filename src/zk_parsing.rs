@@ -8,10 +8,8 @@ use test_log::test;
 
 use crate::{
     document_component::{ListElem, Property},
-    util::{
-        apply_substitutions, file_link_pattern, indent_level, link_name_pattern,
-        trim_like_first_line_plus,
-    },
+    md_parsing::{ListElement, MdComponent, parse_md_text},
+    util::{apply_substitutions, file_link_pattern, link_name_pattern},
 };
 use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
@@ -28,13 +26,10 @@ enum ZkToken {
     SingleHash,
     #[token("```ad-note")]
     AdNoteStart,
-
     #[token("```")]
     TripleBackQuote,
-
     #[token("![[")]
     EmbedStart,
-
     #[token("[[")]
     OpenDoubleBraces,
     #[token("]]")]
@@ -51,18 +46,12 @@ enum ZkToken {
     Bracket,
     #[token("]")]
     ClosingBracket,
-    // Or regular expressions.
     #[regex("[-a-z_A-Z]+")]
     Name,
     #[token("- ")]
     ListStart,
     #[token("---")]
     FrontmatterDelim,
-    /*#[regex(r"[a-zA-Z_]+\s*::=[ \t]*[a-zA-Z_]*")]
-    SingleProperty,
-    //#[regex(r"
-    #[regex(r"[a-zA-Z_]+\s*::=[ \t]*\[(([a-zA-Z_]*\s*,\s*)*[a-zA-Z_]*)?\]")]
-    MultiProperty,*/
     // the pipes are a workaround for a known bug with * in regex patterns, see e.g. https://github.com/maciejhirsz/logos/issues/456
     #[regex(r"[a-zA-Z_]+(\s|\s\s|\s\s\s|)::=\s*")]
     PropertyStart,
@@ -70,16 +59,8 @@ enum ZkToken {
     MiscText,
     #[token("\\")]
     Backslash,
-    // #[regex(r"\\u\{[a-f0-9]\}")]
-    //Unicode,
     #[regex(r"[^\u0000-\u007F]+")]
     Unicode,
-}
-
-impl ZkToken {
-    fn is_blank(&self) -> bool {
-        matches!(self, Self::Space) || matches!(self, Self::Newline)
-    }
 }
 
 pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
@@ -97,8 +78,57 @@ pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
     Ok(ParsedDocument::ParsedFile(pt.into_components(), file_path))
 }
 
-#[instrument(skip_all)]
+#[instrument]
 pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
+    let parsed_md = parse_md_text(text).context("Failed to parse md")?;
+    let mut components = vec![];
+    parsed_md.into_iter().try_for_each(|comp| match comp {
+        MdComponent::Heading(level, text) => {
+            components.push(DocumentComponent::new(DocumentElement::Heading(
+                level as u16,
+                text,
+            )));
+            Ok::<(), anyhow::Error>(())
+        }
+        MdComponent::Text(text) => {
+            let tmp = parse_zk_text_inner(&text, file_dir)?;
+            let mut comps = tmp.into_components();
+            components.append(&mut comps);
+            Ok(())
+        }
+        MdComponent::List(list_elements, terminated_by_blank_line) => {
+            let list_elements: Result<Vec<ListElem>> = list_elements
+                .iter()
+                .map(|le| parse_md_list_element(le, file_dir))
+                .collect();
+            components.push(DocumentComponent::new(DocumentElement::List(
+                list_elements?,
+                terminated_by_blank_line,
+            )));
+            Ok(())
+        }
+    })?;
+
+    Ok(ParsedDocument::ParsedText(components))
+}
+
+fn parse_md_list_element(
+    list_element: &ListElement,
+    file_dir: &Option<PathBuf>,
+) -> Result<ListElem> {
+    let contents = parse_zk_text_inner(&list_element.text, file_dir)?;
+    let children: Result<Vec<ListElem>> = list_element
+        .children
+        .iter()
+        .map(|c| parse_md_list_element(c, file_dir))
+        .collect();
+    let mut res = ListElem::new(contents);
+    res.children = children?;
+    Ok(res)
+}
+
+#[instrument(skip_all)]
+pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
     use ZkToken::*;
     let text = apply_substitutions(text);
     debug!("text after subsitutions: {text:?}");
@@ -106,16 +136,12 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let mut lexer = ZkToken::lexer(&text);
     let mut res = vec![];
     let mut blank_line = true;
-    let indent_spaces = 0;
     // opening [ is not included as this is only run right after encountering [
     let file_link_re = regex::Regex::new(&format!(
         r"{}\]\({}\)",
         link_name_pattern(),
         file_link_pattern()
     ))?;
-    /*let file_link_re = regex::Regex::new(
-        r####"([\sa-zA-ZüäöÜÄÖ0-9'’’?!\.:\-/|•·$§@&+,()\\{}\[\]#"]|[^\u0000-\u007F])+\]\(([-a-zA-Z_/\.]+)\)"####,
-    )?;*/
 
     while let Some(result) = lexer.next() {
         debug!(
@@ -140,18 +166,6 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         }
                         blank_line = false;
                     }
-                    /*SingleProperty => {
-                        let sp = parse_single_property(&lexer)?;
-                        let sp = DocumentElement::Properties(vec![sp]);
-                        res.push(DocumentComponent::new(sp));
-                        blank_line = false;
-                    }
-                    MultiProperty => {
-                        let mp = parse_multi_property(&lexer)?;
-                        let mp = DocumentElement::Properties(vec![mp]);
-                        res.push(DocumentComponent::new(mp));
-                        blank_line = false;
-                    }*/
                     PropertyStart => {
                         if blank_line {
                             debug!("found property start: {lexer:?}");
@@ -165,16 +179,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         }
                     }
                     SingleHash => {
-                        if blank_line {
-                            debug!("found heading: {lexer:?}");
-                            let elem = parse_heading(&mut lexer)?;
-                            let comp = DocumentComponent::new(elem);
-                            res.push(comp);
-                            blank_line = true;
-                        } else {
-                            res.push(DocumentComponent::new_text("#"));
-                            blank_line = false;
-                        }
+                        res.push(DocumentComponent::new_text("#"));
                     }
                     Name => {
                         res.push(DocumentComponent::new(DocumentElement::Text(
@@ -258,17 +263,6 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         res.push(DocumentComponent::new_text("\\"));
                         blank_line = false;
                     }
-                    /*OpenDoubleBraces => {
-                        let parsed = parse_file_link(&mut lexer, file_dir);
-                        if let Ok((name, section, rename)) = parsed {
-                            res.push(DocumentComponent::new(DocumentElement::FileLink(
-                                name, section, rename,
-                            )));
-                        } else {
-                            bail!("Something went wrong when trying to parse file link: {parsed:?}")
-                        }
-                        blank_line = false;
-                    }*/
                     MiscText => {
                         res.push(DocumentComponent::new_text(lexer.slice()));
                         blank_line = false;
@@ -277,15 +271,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                         res.push(DocumentComponent::new_text("\r"));
                     }
                     ListStart => {
-                        if blank_line {
-                            let le = parse_list(&mut lexer, indent_spaces, file_dir)?;
-                            //let mut comps = le.into_components();
-                            res.push(DocumentComponent::new(le));
-                            //res.append(&mut comps);
-                            blank_line = true;
-                        } else {
-                            res.push(DocumentComponent::new_text("- "));
-                        }
+                        res.push(DocumentComponent::new_text("- "));
                     }
                     FrontmatterDelim => {
                         let fm = parse_frontmatter(&mut lexer, file_dir)?;
@@ -293,17 +279,6 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                     }
                     Unicode => {
                         let slice = lexer.slice();
-                        /*if let Some((_, code)) = slice.split_once('{') {
-                            let code = code.trim_end_matches('}');
-                            let unicode = u32::from_str_radix(code, 16)
-                                .context(format!("Could not generate unicode for {slice:?}!"))?;
-                            let text = char::from_u32(unicode)
-                                .context(format!(
-                                    "Failed to get char for unicode {unicode}, input: {slice:?}"
-                                ))?
-                                .to_string();
-                            res.push(DocumentComponent::new_text(&text));
-                        }*/
                         res.push(DocumentComponent::new_text(slice));
                     }
                     _ => {
@@ -492,112 +467,6 @@ fn construct_error_details(lexer: &Lexer<'_, ZkToken>) -> String {
 }
 
 #[instrument]
-fn parse_list(
-    lexer: &mut Lexer<'_, ZkToken>,
-    initial_indent_spaces: usize,
-    file_dir: &Option<PathBuf>,
-) -> Result<DocumentElement> {
-    // determine the extent of the list
-    let mut last_was_blank = false;
-    let mut blank_line = false;
-    let mut text = " ".repeat(initial_indent_spaces);
-    // TODO: find a nicer fix
-    // needed as the parse logic removes the first list start
-    text.push_str("- ");
-    let mut terminated_by_blank_line = false;
-    while let Some(token) = lexer.next() {
-        let token = match token {
-            Ok(token) => token,
-            Err(_) => bail!(
-                "list element parsing failed: {}",
-                construct_error_details(lexer)
-            ),
-        };
-        let slice = lexer.slice();
-        debug!(
-            "token: {token:?} for {slice:?}; is blank={}; last: {last_was_blank}",
-            token.is_blank()
-        );
-        text.push_str(slice);
-        if !token.is_blank() {
-            blank_line = false;
-        }
-        if token == ZkToken::Newline {
-            last_was_blank = blank_line;
-            blank_line = true;
-        }
-        if blank_line && last_was_blank {
-            debug!("finishing list text search");
-            terminated_by_blank_line = true;
-            break;
-        }
-    }
-    debug!("list text: {text:?}");
-    let mut list_components = vec![];
-    let mut current = String::new();
-    let mut current_indent = 0;
-
-    text.lines().for_each(|l| {
-        if l.trim().starts_with("- ") {
-            if !current.is_empty() {
-                list_components.push((current.clone(), current_indent));
-            }
-            current_indent = indent_level(l);
-
-            current = l.to_string();
-        } else {
-            current.push('\n');
-            current.push_str(l);
-        }
-    });
-    if !current.is_empty() {
-        list_components.push((current.clone(), current_indent));
-    }
-    debug!("list components: {list_components:?}");
-
-    // text contains the text that comprises the list
-    //parse_list_element_from_text(&text, file_dir)
-    let mut pos = 0;
-    let mut components = vec![];
-    loop {
-        let (comp, new_pos) = assemble_blocks_rec(pos, &list_components, file_dir)?;
-        pos = new_pos;
-        components.push(comp);
-        if pos >= list_components.len() {
-            break;
-        }
-    }
-    /*if terminated_by_blank_line {
-        components.push(DocumentComponent::new_text("\n\n"));
-    }*/
-    let elem = DocumentElement::List(components, terminated_by_blank_line);
-    Ok(elem)
-    //Ok(DocumentComponent::new(element))
-    //Ok(ParsedDocument::ParsedText(components))
-}
-
-#[instrument]
-fn assemble_blocks_rec(
-    pos: usize,
-    block_texts_indent: &[(String, usize)],
-    file_dir: &Option<PathBuf>,
-) -> Result<(ListElem, usize)> {
-    let (block_text, i) = &block_texts_indent[pos];
-    let block_text = trim_like_first_line_plus(block_text, 2);
-    let mut first_block = parse_list_element_from_text(&block_text, file_dir)?;
-    let mut pos = pos + 1;
-    let mut children = vec![];
-    while pos < block_texts_indent.len() && block_texts_indent[pos].1 > *i {
-        let (child, new_pos) = assemble_blocks_rec(pos, block_texts_indent, file_dir)?;
-        children.push(child);
-        pos = new_pos;
-    }
-    first_block.children = children;
-
-    Ok((first_block, pos))
-}
-
-#[instrument]
 fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ListElem> {
     // TODO: trailing spaces
     let text = text.trim_start().strip_prefix("- ").context(format!(
@@ -605,7 +474,6 @@ fn parse_list_element_from_text(text: &str, file_dir: &Option<PathBuf>) -> Resul
     ))?;
     let pd = parse_zk_text(text, file_dir)?;
     Ok(ListElem::new(pd))
-    //Ok(DocumentElement::ListElement(pd, vec![]))
 }
 
 #[instrument(skip_all)]
@@ -618,67 +486,6 @@ fn consume_tokens(lexer: &mut Lexer<'_, ZkToken>) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[instrument]
-fn parse_heading(lexer: &mut Lexer<'_, ZkToken>) -> Result<DocumentElement> {
-    use ZkToken::*;
-    let mut level = 1;
-    let mut text = String::new();
-    let mut start = true;
-    while let Some(result) = lexer.next() {
-        debug!("got {result:?} for {:?}", lexer.slice());
-        let token = match result {
-            Err(_) => {
-                let slice = lexer.slice();
-                if slice.ends_with('\n') {
-                    text.push_str(slice.trim_end());
-                    let res = Ok(DocumentElement::Heading(level, text));
-                    debug!("result: {res:?}");
-                    return res;
-                }
-
-                bail!(
-                    "Failed to parse heading! {result:?}; {}",
-                    construct_error_details(lexer)
-                )
-            }
-            Ok(token) => token,
-        };
-        match token {
-            SingleHash => {
-                if start {
-                    level += 1;
-                } else {
-                    text.push_str(lexer.slice());
-                }
-            }
-            Newline => {
-                let res = Ok(DocumentElement::Heading(level, text));
-                debug!("result: {res:?}");
-                return res;
-            }
-            other => {
-                start = false;
-                let txt = lexer.slice();
-                if txt.ends_with('\n') {
-                    text.push_str(txt.trim_end());
-                    let res = Ok(DocumentElement::Heading(level, text));
-                    debug!("result: {res:?}");
-                    return res;
-                } else if txt.contains('\n') {
-                    bail!(
-                        "parse heading: encountered newline in the middle of slice {txt:?} for token {other:?}!"
-                    )
-                } else {
-                    text.push_str(txt);
-                }
-            }
-        }
-    }
-    let res = Ok(DocumentElement::Heading(level, text));
-    debug!("result: {res:?}");
-    res
 }
 
 fn parse_adnote(
@@ -1104,7 +911,7 @@ fn test_link_in_list() {
         "- [Radtour München - Starnberger See](../../txpk-radtour-munchen-starnberger-see.md)";
     let res = parse_zk_text(text, &None).unwrap();
     let res = res.to_zk_text(&None);
-    assert_eq!(text, res);
+    assert_eq!(res, text);
 }
 
 #[test]
