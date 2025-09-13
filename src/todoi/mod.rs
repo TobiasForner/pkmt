@@ -438,14 +438,14 @@ impl ZkHandler {
             DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
-        if let Some(prop) = property {
-            if let DocumentElement::Properties(props) = prop.get_element_mut() {
-                props.iter_mut().for_each(|p| {
-                    if p.has_name(prop_name) {
-                        p.add_values_parse(values, &TextMode::Zk, file_dir);
-                    }
-                });
-            }
+        if let Some(prop) = property
+            && let DocumentElement::Properties(props) = prop.get_element_mut()
+        {
+            props.iter_mut().for_each(|p| {
+                if p.has_name(prop_name) {
+                    p.add_values_parse(values, &TextMode::Zk, file_dir);
+                }
+            });
         }
     }
 
@@ -463,14 +463,14 @@ impl ZkHandler {
             DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
-        if let Some(prop) = property {
-            if let DocumentElement::Properties(props) = prop.get_element_mut() {
-                props.iter_mut().for_each(|p| {
-                    if p.has_name(prop_name) {
-                        p.add_values(values);
-                    }
-                });
-            }
+        if let Some(prop) = property
+            && let DocumentElement::Properties(props) = prop.get_element_mut()
+        {
+            props.iter_mut().for_each(|p| {
+                if p.has_name(prop_name) {
+                    p.add_values(values);
+                }
+            });
         }
     }
 }
@@ -479,11 +479,11 @@ impl TaskDataHandler for ZkHandler {
     #[instrument]
     fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
         debug!("handling {task_data:?}");
-        if let Some(url) = task_data.get_url() {
-            if url_is_duplicate(url, &self.root_dir, &TextMode::Zk)? {
-                info!("Duplicate url: {url}! Skipping {task_data:?}");
-                return Ok(false);
-            }
+        if let Some(url) = task_data.get_url()
+            && url_is_duplicate(url, &self.root_dir, &TextMode::Zk)?
+        {
+            info!("Duplicate url: {url}! Skipping {task_data:?}");
+            return Ok(false);
         }
         let Some(title) = task_data.get_title() else {
             debug!("no title!");
