@@ -654,13 +654,11 @@ impl ListElem {
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
         self.contents.get_document_component(selector).or_else(|| {
-            let tmp = self
-                .children
+            self.children
                 .iter()
                 .map(|le| le.get_document_component(selector))
                 .find(|c| c.is_some())
-                .flatten();
-            tmp
+                .flatten()
         })
     }
     pub fn get_list_elem(&self, selector: &dyn Fn(&ListElem) -> bool) -> Option<ListElem> {
