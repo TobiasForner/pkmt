@@ -22,34 +22,6 @@ pub fn indent_spaces(line: &str) -> usize {
     line.chars().take_while(|c| *c == ' ').count()
 }
 
-pub fn indent_level(line: &str) -> usize {
-    let indent_pattern = " ".repeat(SPACES_PER_INDENT);
-    let line = line.replace("\t", &indent_pattern);
-    let mut res = 0;
-    let mut pos = 0;
-    while pos < line.len() && line[pos..].starts_with(&indent_pattern) {
-        res += 1;
-        pos += SPACES_PER_INDENT;
-    }
-    res
-}
-
-pub fn overlapping_captures(
-    text: &str,
-    re: regex::Regex,
-    move_after_ith_group: usize,
-) -> Vec<Captures<'_>> {
-    let mut pos = 0;
-    let mut res = vec![];
-    loop {
-        let Some(captures) = re.captures_at(text, pos) else {
-            return res;
-        };
-        pos = captures.get(move_after_ith_group).unwrap().end();
-        res.push(captures);
-    }
-}
-
 pub fn trim_like_first_line_plus(text: &str, extra: usize) -> String {
     let indent_pattern = " ".repeat(SPACES_PER_INDENT);
     let text = text.replace("\t", &indent_pattern);
@@ -139,4 +111,32 @@ pub fn link_name_pattern() -> String {
 
 pub fn file_link_pattern() -> String {
     r"([\sa-zA-Z0-9'?!\.:\-/_=%&@#]+)".to_string()
+}
+
+pub fn _indent_level(line: &str) -> usize {
+    let indent_pattern = " ".repeat(SPACES_PER_INDENT);
+    let line = line.replace("\t", &indent_pattern);
+    let mut res = 0;
+    let mut pos = 0;
+    while pos < line.len() && line[pos..].starts_with(&indent_pattern) {
+        res += 1;
+        pos += SPACES_PER_INDENT;
+    }
+    res
+}
+
+pub fn _overlapping_captures(
+    text: &str,
+    re: regex::Regex,
+    move_after_ith_group: usize,
+) -> Vec<Captures<'_>> {
+    let mut pos = 0;
+    let mut res = vec![];
+    loop {
+        let Some(captures) = re.captures_at(text, pos) else {
+            return res;
+        };
+        pos = captures.get(move_after_ith_group).unwrap().end();
+        res.push(captures);
+    }
 }
