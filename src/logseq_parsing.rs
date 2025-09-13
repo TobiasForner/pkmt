@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use tracing::debug;
 
 use anyhow::{Context, Result, bail};
 use logos::{Lexer, Logos};
@@ -192,18 +191,11 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
                     let rec = parse_logseq_text(&inner, &None)?;
 
                     let mut rec_components = rec.into_components();
-                    if rec_components.len() == 1 {
-                        if let DocumentElement::List(list_elements, _) = &rec_components[0].element
-                        {
-                            if list_elements.len() == 1 {
-                                rec_components = list_elements[0].contents.components().to_vec();
-                            }
-                        } /*else if let DocumentElement::ListElement(pd, props) =
-                        &rec_components[0].element
-                        && props.is_empty()
-                        {
-                        rec_components = pd.clone().into_components();
-                        }*/
+                    if rec_components.len() == 1
+                        && let DocumentElement::List(list_elements, _) = &rec_components[0].element
+                        && list_elements.len() == 1
+                    {
+                        rec_components = list_elements[0].contents.components().to_vec();
                     };
 
                     components.push(DocumentComponent::new(DocumentElement::Admonition(
@@ -395,7 +387,7 @@ fn test_parse_youtube_template() {
 fn test_comp_problem_template() {
     let text = "- # CompProblem\n\t- template:: computational_problem\n\t  tags:: [[Computational Problem]]\n\t\t- #+BEGIN_QUOTE\n\t\t  **Definition**\n\t\t  * *Input*: \n\t\t  * *Objective*:\n\t\t  #+END_QUOTE";
     let res = parse_logseq_text(text, &None);
-    debug!("{res:?}");
+    println!("{res:?}");
     assert_eq!(
         res.unwrap().to_logseq_text(&None),
         text.replace("\t", "    ")

@@ -312,12 +312,11 @@ fn run() -> Result<()> {
                         }
                         CreatorCommand::ShowFile { relative } => {
                             let mut file = get_zk_creator_file(&root_dir, &name)?;
-                            if let Some(relative) = relative {
-                                if let Some(rel) = relative.parent() {
-                                    if let Some(rel) = pathdiff::diff_paths(&file, rel) {
-                                        file = rel.to_path_buf();
-                                    }
-                                }
+                            if let Some(relative) = relative
+                                && let Some(rel) = relative.parent()
+                                && let Some(rel) = pathdiff::diff_paths(&file, rel)
+                            {
+                                file = rel.to_path_buf();
                             }
                             println!("{}", file.to_string_lossy());
                         }

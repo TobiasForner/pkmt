@@ -105,12 +105,11 @@ impl TodoistAPI {
             })
             .flat_map(|(a, b)| [a.to_string(), b.to_string()])
             .collect();
-        let res = tasks
+        tasks
             .iter()
             .filter(|t| !ids_to_filter.contains(&t.id))
             .cloned()
-            .collect();
-        res
+            .collect()
     }
 
     pub fn close_task(&self, task: &TodoistTask) -> bool {

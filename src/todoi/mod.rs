@@ -21,7 +21,7 @@ use tracing::{debug, info, instrument};
 use crate::{
     document_component::{
         DocumentComponent, DocumentElement, FileInfo, ListElem, MentionedFile, ParsedDocument,
-        PropValue, Property,
+        PropValue,
     },
     logseq_parsing::parse_logseq_file,
     parse::{TextMode, parse_all_files_in_dir, parse_file},
@@ -69,19 +69,18 @@ impl LogSeqTemplates {
                 _ => false,
             })
             .iter()
-            .for_each(|c| match &c.element {
-                DocumentElement::Properties(props) => {
-                    if let Some(p) = props.iter().find(|p| p.has_name("template")) {
-                        p.values.iter().for_each(|v| {
-                            let tm = match v {
-                                PropValue::FileLink(mf, _, _) => mf.to_string(),
-                                PropValue::String(text) => text.to_string(),
-                            };
-                            res.push(tm);
-                        });
-                    }
+            .for_each(|c| {
+                if let DocumentElement::Properties(props) = &c.element
+                    && let Some(p) = props.iter().find(|p| p.has_name("template"))
+                {
+                    p.values.iter().for_each(|v| {
+                        let tm = match v {
+                            PropValue::FileLink(mf, _, _) => mf.to_string(),
+                            PropValue::String(text) => text.to_string(),
+                        };
+                        res.push(tm);
+                    });
                 }
-                _ => {}
             });
         res
     }
@@ -97,13 +96,6 @@ fn get_list_elem_with_doc_elem(
             .iter()
             .any(|dc| elem_selector(&dc.element))
     })
-}
-fn fill_props(props: &mut Vec<Property>, prop_name: &str, values: &[PropValue]) {
-    props.iter_mut().for_each(|p| {
-        if p.has_name(prop_name) {
-            p.add_values(values);
-        }
-    });
 }
 
 /// gathers tasks and calls the correct handler
@@ -583,14 +575,14 @@ fn fill_all_props_le(pd: &mut ListElem, properties: &[(&str, Vec<PropValue>)]) {
             DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
-        if let Some(prop) = property {
-            if let DocumentElement::Properties(props) = prop.get_element_mut() {
-                props.iter_mut().for_each(|p| {
-                    if p.has_name(prop_name) {
-                        p.add_values(values);
-                    }
-                });
-            }
+        if let Some(prop) = property
+            && let DocumentElement::Properties(props) = prop.get_element_mut()
+        {
+            props.iter_mut().for_each(|p| {
+                if p.has_name(prop_name) {
+                    p.add_values(values);
+                }
+            });
         }
     });
 }
@@ -678,41 +670,35 @@ impl TaskDataHandler for LogSeqHandler {
                     .get_template_comp("youtube")
                     .expect("No youtube template!")
                     .clone();
-                let yt_props = yt_template
-                    .get_document_component_mut(&|dc| match &dc.element {
-                        DocumentElement::Properties(_) => true,
-                        _ => false,
-                    })
-                    .context("Youtube template must contain properties")?;
-
-                if let DocumentElement::Properties(props) = yt_props.get_element_mut() {
-                    fill_props(
-                        props,
+                let properties = [
+                    (
                         "authors",
-                        &[PropValue::FileLink(
+                        vec![PropValue::FileLink(
                             MentionedFile::FileName(channel.to_string()),
                             None,
                             None,
                         )],
-                    );
-                    fill_props(props, "description", &[PropValue::String(title.clone())]);
-                    let tags: Vec<PropValue> = tags
-                        .iter()
-                        .map(|t| PropValue::String(t.to_string()))
-                        .collect();
-                    fill_props(props, "description", &tags);
-                }
+                    ),
+                    ("description", vec![PropValue::String(title.clone())]),
+                    (
+                        "tags",
+                        tags.iter()
+                            .map(|t| PropValue::String(t.to_string()))
+                            .collect(),
+                    ),
+                ];
+                fill_all_props_le(&mut yt_template, &properties);
 
                 // embed child
-                if let Some(le) = yt_template.children.get_mut(0) {
-                    if let Some(le) = le.children.get_mut(0) {
-                        let embed = if url.contains("/shorts/") {
-                            DocumentComponent::new_text(url)
-                        } else {
-                            DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
-                        };
-                        le.contents.add_component(embed);
-                    }
+                if let Some(le) = yt_template.children.get_mut(0)
+                    && let Some(le) = le.children.get_mut(0)
+                {
+                    let embed = if url.contains("/shorts/") {
+                        DocumentComponent::new_text(url)
+                    } else {
+                        DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
+                    };
+                    le.contents.add_component(embed);
                 }
                 let yt_block =
                     DocumentComponent::new(DocumentElement::List(vec![yt_template], false));
@@ -926,22 +912,21 @@ fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
     let yt_video_url_re =
         Regex::new(r"(https://)(?:www\.)?(?:youtu.be|youtube\.com)/(shorts/)?[A-Za-z0-9?=\-_&]*")
             .unwrap();
-    if let Some(m) = yt_video_url_re.captures(&task.content) {
-        if let Some(video_url) = m.get(0) {
-            let video_url = video_url.as_str();
-            if let Ok((video_title, authors)) = youtube_details(video_url, &config.keys.yt_api_key)
-            {
-                let mut tags = vec![];
+    if let Some(m) = yt_video_url_re.captures(&task.content)
+        && let Some(video_url) = m.get(0)
+    {
+        let video_url = video_url.as_str();
+        if let Ok((video_title, authors)) = youtube_details(video_url, &config.keys.yt_api_key) {
+            let mut tags = vec![];
 
-                if let Some(mut ct) = config.get_channel_tags(&authors) {
-                    tags.append(&mut ct);
-                }
-
-                tags.append(&mut config.get_keyword_tags(&video_title));
-                tags.sort();
-                tags.dedup();
-                return TaskData::Youtube(video_url.into(), video_title, authors, tags);
+            if let Some(mut ct) = config.get_channel_tags(&authors) {
+                tags.append(&mut ct);
             }
+
+            tags.append(&mut config.get_keyword_tags(&video_title));
+            tags.sort();
+            tags.dedup();
+            return TaskData::Youtube(video_url.into(), video_title, authors, tags);
         }
     }
     TaskData::Unhandled
@@ -1019,30 +1004,6 @@ fn handle_youtube_playlist(task: &TodoistTask, config: &Config) -> TaskData {
         }
     }
     TaskData::Unhandled
-}
-
-pub fn fill_properties(
-    props: &[(String, String)],
-    add: &[(&str, Vec<String>)],
-    drop: &[&str],
-) -> Vec<(String, String)> {
-    let mut res = vec![];
-    props.iter().for_each(|(key, val)| {
-        let mut vals = vec![];
-        if let Some((_, to_add)) = add.iter().find(|(k, _)| k == key) {
-            if !val.trim().is_empty() {
-                vals.push(val.to_string());
-            }
-            vals.extend(to_add.iter().map(|s| s.to_string()));
-        }
-        if !drop.contains(&key.as_str()) {
-            if vals.is_empty() {
-                vals.push(val.to_string());
-            }
-            res.push((key.to_string(), vals.join(", ")))
-        }
-    });
-    res
 }
 
 fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bool> {

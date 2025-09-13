@@ -144,7 +144,7 @@ impl ParsedDocument {
         None
     }
 
-    pub fn get_list_elem_mut(
+    pub fn _get_list_elem_mut(
         &mut self,
         selector: &dyn Fn(&ListElem) -> bool,
     ) -> Option<&mut ListElem> {
@@ -154,7 +154,7 @@ impl ParsedDocument {
             ParsedText(comps) => comps,
         };
         for comp in comps {
-            let rec = comp.get_list_elem_mut(selector);
+            let rec = comp._get_list_elem_mut(selector);
             if rec.is_some() {
                 return rec;
             }
@@ -485,10 +485,10 @@ impl Property {
     fn try_prop_value_parse(val: &str, mode: &TextMode, file_dir: &Option<PathBuf>) -> PropValue {
         if let Ok(pd) = parse::parse_text(val, mode, file_dir) {
             let comps = pd.components();
-            if let [comp] = &comps[..] {
-                if let DocumentElement::FileLink(mf, sec, rename) = &comp.element {
-                    return PropValue::FileLink(mf.clone(), sec.clone(), rename.clone());
-                }
+            if let [comp] = &comps[..]
+                && let DocumentElement::FileLink(mf, sec, rename) = &comp.element
+            {
+                return PropValue::FileLink(mf.clone(), sec.clone(), rename.clone());
             }
         }
         PropValue::String(val.to_string())
@@ -545,15 +545,14 @@ impl PropValue {
                 Zk => match mf {
                     MentionedFile::FilePath(p) => {
                         let mut p = p.clone();
-                        if let Some(file_info) = file_info {
-                            if let Some(dest) = &file_info.destination_file {
-                                if let Some(parent) = dest.parent() {
-                                    let rel = pathdiff::diff_paths(&p, parent);
-                                    debug!("determined relative path {rel:?}");
-                                    if let Some(rel) = rel {
-                                        p = rel;
-                                    }
-                                }
+                        if let Some(file_info) = file_info
+                            && let Some(dest) = &file_info.destination_file
+                            && let Some(parent) = dest.parent()
+                        {
+                            let rel = pathdiff::diff_paths(&p, parent);
+                            debug!("determined relative path {rel:?}");
+                            if let Some(rel) = rel {
+                                p = rel;
                             }
                         }
                         let p = p.as_os_str();
@@ -673,7 +672,7 @@ impl ListElem {
         }
     }
 
-    pub fn get_list_elem_mut(
+    pub fn _get_list_elem_mut(
         &mut self,
         selector: &dyn Fn(&ListElem) -> bool,
     ) -> Option<&mut ListElem> {
@@ -682,7 +681,7 @@ impl ListElem {
         } else {
             self.children
                 .iter_mut()
-                .map(|le| le.get_list_elem_mut(selector))
+                .map(|le| le._get_list_elem_mut(selector))
                 .find(|c| c.is_some())
                 .flatten()
         }
@@ -709,13 +708,11 @@ impl ListElem {
         self.contents
             .get_document_component_mut(selector)
             .or_else(|| {
-                let tmp = self
-                    .children
+                self.children
                     .iter_mut()
                     .map(|le| le.get_document_component_mut(selector))
                     .find(|c| c.is_some())
-                    .flatten();
-                tmp
+                    .flatten()
             })
     }
 
@@ -790,23 +787,21 @@ impl DocumentElement {
                         }
                     }
                 };
-                if let Some(file_info) = file_info {
-                    if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
-                        if let Some((_name, ext)) = file_name.rsplit_once('.') {
-                            if ["png", "jpeg"].contains(&ext) {
-                                debug!("image: {file_name}: {file_info:?}");
-                                let dest_dir = dest_file.parent().unwrap();
-                                let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
-                                if let Some(rel) = rel {
-                                    return format!(
-                                        "![image.{ext}]({})",
-                                        rel.to_string_lossy().replace("\\", "/")
-                                    );
-                                } else {
-                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
-                                }
-                            }
-                        }
+                if let Some(file_info) = file_info
+                    && let Some((_, dest_file, _, image_out)) = file_info.get_all()
+                    && let Some((_name, ext)) = file_name.rsplit_once('.')
+                    && ["png", "jpeg"].contains(&ext)
+                {
+                    debug!("image: {file_name}: {file_info:?}");
+                    let dest_dir = dest_file.parent().unwrap();
+                    let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
+                    if let Some(rel) = rel {
+                        return format!(
+                            "![image.{ext}]({})",
+                            rel.to_string_lossy().replace("\\", "/")
+                        );
+                    } else {
+                        debug!("{image_out:?} and {dest_file:?} don't share a path!")
                     }
                 }
 
@@ -974,15 +969,14 @@ impl DocumentElement {
                     MentionedFile::FilePath(p) => {
                         debug!("file link: {file:?}; {name:?}");
                         let mut p = p.clone();
-                        if let Some(file_info) = file_info {
-                            if let Some(dest) = &file_info.destination_file {
-                                if let Some(parent) = dest.parent() {
-                                    let rel = pathdiff::diff_paths(&p, parent);
-                                    debug!("determined relative path {rel:?}");
-                                    if let Some(rel) = rel {
-                                        p = rel;
-                                    }
-                                }
+                        if let Some(file_info) = file_info
+                            && let Some(dest) = &file_info.destination_file
+                            && let Some(parent) = dest.parent()
+                        {
+                            let rel = pathdiff::diff_paths(&p, parent);
+                            debug!("determined relative path {rel:?}");
+                            if let Some(rel) = rel {
+                                p = rel;
                             }
                         }
                         let p = p.as_os_str();
@@ -1009,23 +1003,21 @@ impl DocumentElement {
                         }
                     }
                 };
-                if let Some(file_info) = file_info {
-                    if let Some((_, dest_file, _, image_out)) = file_info.get_all() {
-                        if let Some((_name, ext)) = file_name.rsplit_once('.') {
-                            if ["png", "jpeg"].contains(&ext) {
-                                debug!("image: {file_name}: {file_info:?}");
-                                let dest_dir = dest_file.parent().unwrap();
-                                let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
-                                if let Some(rel) = rel {
-                                    return format!(
-                                        "![image.{ext}]({})",
-                                        rel.to_string_lossy().replace("\\", "/")
-                                    );
-                                } else {
-                                    debug!("{image_out:?} and {dest_file:?} don't share a path!")
-                                }
-                            }
-                        }
+                if let Some(file_info) = file_info
+                    && let Some((_, dest_file, _, image_out)) = file_info.get_all()
+                    && let Some((_name, ext)) = file_name.rsplit_once('.')
+                    && ["png", "jpeg"].contains(&ext)
+                {
+                    debug!("image: {file_name}: {file_info:?}");
+                    let dest_dir = dest_file.parent().unwrap();
+                    let rel = pathdiff::diff_paths(image_out.join(file_name), dest_dir);
+                    if let Some(rel) = rel {
+                        return format!(
+                            "![image.{ext}]({})",
+                            rel.to_string_lossy().replace("\\", "/")
+                        );
+                    } else {
+                        debug!("{image_out:?} and {dest_file:?} don't share a path!")
                     }
                 }
 
@@ -1326,7 +1318,7 @@ impl DocumentComponent {
         &mut self.element
     }
 
-    pub fn get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
+    pub fn _get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
         self.children.get_mut(n)
     }
 
@@ -1365,14 +1357,14 @@ impl DocumentComponent {
         })
     }
 
-    pub fn get_list_elem_mut(
+    pub fn _get_list_elem_mut(
         &mut self,
         selector: &dyn Fn(&ListElem) -> bool,
     ) -> Option<&mut ListElem> {
         match &mut self.element {
             DocumentElement::List(list_elements, _) => list_elements
                 .iter_mut()
-                .map(|le| le.get_list_elem_mut(selector))
+                .map(|le| le._get_list_elem_mut(selector))
                 .find(|le| le.is_some())
                 .flatten(),
             _ => None,
@@ -1380,7 +1372,7 @@ impl DocumentComponent {
         .or_else(|| {
             self.children
                 .iter_mut()
-                .map(|c| c.get_list_elem_mut(selector))
+                .map(|c| c._get_list_elem_mut(selector))
                 .find(|c| c.is_some())
                 .flatten()
         })

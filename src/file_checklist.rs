@@ -10,10 +10,10 @@ pub fn checklist_for_tree<T: AsRef<Path>>(root_dir: T, todo_marker: &str) -> Res
         let path = f.unwrap().path();
         if path.is_dir() {
             dirs.push(path);
-        } else if let Some(ext) = path.extension() {
-            if ["md"].contains(&ext.to_str().unwrap_or("should not be found")) {
-                files.push(path);
-            }
+        } else if let Some(ext) = path.extension()
+            && ["md"].contains(&ext.to_str().unwrap_or("should not be found"))
+        {
+            files.push(path);
         }
         Ok::<(), anyhow::Error>(())
     })?;
