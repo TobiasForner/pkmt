@@ -951,7 +951,7 @@ fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
 fn handle_sbs_task(task: &TodoistTask) -> TaskData {
     let sbs_link_re =
         Regex::new(r"https://ckarchive\.com/b/[a-zA-Z0-9]*\?ck_subscriber_id=2334581400").unwrap();
-    let sbs_website_re = Regex::new(r"https://www.strongerbyscience.com/[a-zA-Z-]+/").unwrap();
+    let sbs_website_re = Regex::new(r"https://www.strongerbyscience.com/[0-9a-zA-Z-]+/").unwrap();
 
     let match_data = if let Some(art_url) = sbs_link_re.captures(&task.content) {
         let author_re = Regex::new(r" newsletter is by ([a-zA-Z\.\s]*).&lt;/h3&gt;").unwrap();
