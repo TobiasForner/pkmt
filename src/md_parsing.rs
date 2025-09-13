@@ -127,7 +127,6 @@ pub fn parse_md_text(text: &str) -> Result<Vec<MdComponent>> {
                     Hashtag => {
                         if blank_line {
                             let (heading, found) = parse_heading(&mut lexer)?;
-                            println!("{heading:?}");
                             res.push(heading);
                             if found {
                                 blank_line = true;
@@ -189,7 +188,7 @@ fn text_until_token(
     let mut res = String::new();
 
     while let Some(result) = lexer.next() {
-        println!("{result:?}: '{:?}'", lexer.slice());
+        debug!("{result:?}: {:?}", lexer.slice());
         match result {
             Ok(some_token) => {
                 if some_token == token {

@@ -604,13 +604,10 @@ impl ListElem {
             TextMode::Zk => self.contents.to_zk_text(file_info),
             _ => todo!(),
         };
-        println!("parsed contents: {:?}", self.contents);
         let contents = trim_like_first_line_plus(&contents, 2);
-        println!("converted contents: {contents:?}");
         let mut res = String::new();
         let mut list_start_added = false;
         contents.lines().enumerate().for_each(|(i, l)| {
-            println!("{i}, {l:?}");
             if i > 0 {
                 res.push('\n');
             }
