@@ -73,7 +73,7 @@ enum MdToken {
     CarriageReturn,
     #[token("- ")]
     ListStart,
-    #[regex(r####"[-a-zA-Z`_.{}^$><,0-9():=*&/;'+!?"|\[\]]+"####)]
+    #[regex(r####"[-a-zA-Z`_.{}^$><,0-9():=*&/;'+!?"|\[\]@%~]+"####)]
     Text,
     #[token("\\")]
     Backslash,
