@@ -14,9 +14,7 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
 
-use crate::document_component::{
-    DocumentComponent, DocumentElement, MentionedFile, ParsedDocument, collapse_text,
-};
+use crate::document_component::{DocumentComponent, MentionedFile, ParsedDocument, collapse_text};
 use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, PartialEq)]
@@ -84,10 +82,7 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
     let mut components = vec![];
     parsed_md.into_iter().try_for_each(|comp| match comp {
         MdComponent::Heading(level, text) => {
-            components.push(DocumentComponent::new(DocumentElement::Heading(
-                level as u16,
-                text,
-            )));
+            components.push(DocumentComponent::Heading(level as u16, text));
             Ok::<(), anyhow::Error>(())
         }
         MdComponent::Text(text) => {
@@ -101,10 +96,10 @@ pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDoc
                 .iter()
                 .map(|le| parse_md_list_element(le, file_dir))
                 .collect();
-            components.push(DocumentComponent::new(DocumentElement::List(
+            components.push(DocumentComponent::List(
                 list_elements?,
                 terminated_by_blank_line,
-            )));
+            ));
             Ok(())
         }
     })?;
@@ -156,9 +151,7 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         let parsed = parse_file_link(&mut lexer, file_dir);
                         // no rename for file embeds
                         if let Ok((name, section, _)) = parsed {
-                            res.push(DocumentComponent::new(DocumentElement::FileEmbed(
-                                name, section,
-                            )));
+                            res.push(DocumentComponent::FileEmbed(name, section));
                         } else {
                             panic!(
                                 "Something went wrong when trying to parse file embed: {parsed:?}"
@@ -171,39 +164,31 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                             debug!("found property start: {lexer:?}");
                             let name = lexer.slice().trim().trim_end_matches("::=").trim();
                             let prop = parse_property(&mut lexer, name.to_string(), file_dir)?;
-                            res.push(DocumentComponent::new(DocumentElement::Properties(vec![
-                                prop,
-                            ])));
+                            res.push(DocumentComponent::Properties(vec![prop]));
                         } else {
-                            res.push(DocumentComponent::new_text(lexer.slice()));
+                            res.push(DocumentComponent::Text(lexer.slice().to_string()));
                         }
                     }
                     SingleHash => {
-                        res.push(DocumentComponent::new_text("#"));
+                        res.push(DocumentComponent::Text("#".to_string()));
                     }
                     Name => {
-                        res.push(DocumentComponent::new(DocumentElement::Text(
-                            lexer.slice().to_string(),
-                        )));
+                        res.push(DocumentComponent::Text(lexer.slice().to_string()));
                         blank_line = false;
                     }
                     AdNoteStart => {
-                        res.push(DocumentComponent::new(parse_adnote(&mut lexer, file_dir)?));
+                        res.push(parse_adnote(&mut lexer, file_dir)?);
                         blank_line = false;
                     }
                     Space => {
-                        res.push(DocumentComponent::new(DocumentElement::Text(
-                            lexer.slice().to_string(),
-                        )));
+                        res.push(DocumentComponent::Text(lexer.slice().to_string()));
                     }
                     Newline => {
-                        res.push(DocumentComponent::new(DocumentElement::Text(
-                            "\n".to_string(),
-                        )));
+                        res.push(DocumentComponent::Text("\n".to_string()));
                         blank_line = true;
                     }
                     Pipe => {
-                        res.push(DocumentComponent::new_text("|"));
+                        res.push(DocumentComponent::Text("|".to_string()));
                         blank_line = false;
                     }
                     Bracket => {
@@ -228,8 +213,7 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                                     path.as_os_str().to_string_lossy().to_string(),
                                 )
                             };
-                            let file_link = DocumentElement::FileLink(mf, None, name);
-                            let file_link = DocumentComponent::new(file_link);
+                            let file_link = DocumentComponent::FileLink(mf, None, name);
                             debug!("Found file link {file_link:?}");
                             res.push(file_link);
 
@@ -251,27 +235,27 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                             }
                         } else {
                             debug!("no file link match!");
-                            res.push(DocumentComponent::new_text("["));
+                            res.push(DocumentComponent::Text("[".to_string()));
                         }
                         blank_line = false;
                     }
                     ClosingBracket => {
-                        res.push(DocumentComponent::new_text("]"));
+                        res.push(DocumentComponent::Text("]".to_string()));
                         blank_line = false;
                     }
                     Backslash => {
-                        res.push(DocumentComponent::new_text("\\"));
+                        res.push(DocumentComponent::Text("\\".to_string()));
                         blank_line = false;
                     }
                     MiscText => {
-                        res.push(DocumentComponent::new_text(lexer.slice()));
+                        res.push(DocumentComponent::Text(lexer.slice().to_string()));
                         blank_line = false;
                     }
                     CarriageReturn => {
-                        res.push(DocumentComponent::new_text("\r"));
+                        res.push(DocumentComponent::Text("\r".to_string()));
                     }
                     ListStart => {
-                        res.push(DocumentComponent::new_text("- "));
+                        res.push(DocumentComponent::Text("- ".to_string()));
                     }
                     FrontmatterDelim => {
                         let fm = parse_frontmatter(&mut lexer, file_dir)?;
@@ -279,13 +263,13 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                     }
                     Unicode => {
                         let slice = lexer.slice();
-                        res.push(DocumentComponent::new_text(slice));
+                        res.push(DocumentComponent::Text(slice.to_string()));
                     }
                     _ => {
                         debug!(
                             "Support missing token types: {token:?}. Falling back to adding text"
                         );
-                        res.push(DocumentComponent::new_text(lexer.slice()));
+                        res.push(DocumentComponent::Text(lexer.slice().to_string()));
                     }
                 }
             }
@@ -444,7 +428,7 @@ fn parse_frontmatter(
                     };
                     tmp
                 })?;
-                return Ok(DocumentComponent::new(DocumentElement::Frontmatter(props)));
+                return Ok(DocumentComponent::Frontmatter(props));
             }
             _ => {
                 text.push_str(lexer.slice());
@@ -491,7 +475,7 @@ fn consume_tokens(lexer: &mut Lexer<'_, ZkToken>) -> Result<()> {
 fn parse_adnote(
     lexer: &mut Lexer<'_, ZkToken>,
     file_dir: &Option<PathBuf>,
-) -> Result<DocumentElement> {
+) -> Result<DocumentComponent> {
     let mut text = String::new();
     while let Some(Ok(token)) = lexer.next() {
         match token {
@@ -515,7 +499,7 @@ fn parse_adnote(
                     }
                 }
                 let pd = parse_zk_text(&body_text, file_dir)?;
-                return Ok(DocumentElement::Admonition(
+                return Ok(DocumentComponent::Admonition(
                     pd.into_components(),
                     properties,
                 ));
@@ -624,14 +608,14 @@ A new line!
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(
-            crate::document_component::DocumentElement::Admonition(
-                vec![DocumentComponent::new_text(
-                    "Some text with $x+1$ math...\nA new line!",
+        let expected = ParsedDocument::ParsedText(vec![
+            crate::document_component::DocumentComponent::Admonition(
+                vec![DocumentComponent::Text(
+                    "Some text with $x+1$ math...\nA new line!".to_string(),
                 )],
                 props,
             ),
-        )]);
+        ]);
         assert_eq!(res, expected);
     } else {
         panic!("Got {res:?}")
@@ -640,13 +624,13 @@ A new line!
 
 #[test]
 fn test_text_parsing() {
-    use DocumentElement::*;
+    use DocumentComponent::*;
     let text = "Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the [maximum clique problem](MaximumClique.md), unless P = NP.";
     let res = parse_zk_text(text, &None);
     if let Ok(res) = res {
         let mut props = HashMap::new();
         props.insert("title".to_string(), "Title".to_string());
-        let expected = ParsedDocument::ParsedText(vec![DocumentComponent::new(Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string())), DocumentComponent::new(FileLink(MentionedFile::FileName("MaximumClique.md".to_string()), None, Some("maximum clique problem".to_string()))), DocumentComponent::new(Text(", unless P = NP.".to_string()))]);
+        let expected = ParsedDocument::ParsedText(vec![Text("Let $n$ denote the number of vertices in an input graph, and consider any constant $\\epsilon > 0$. Then there does not exist an $O(n^{\\epsilon-1})$-approximation algorithm for the ".to_string()), FileLink(MentionedFile::FileName("MaximumClique.md".to_string()), None, Some("maximum clique problem".to_string())), Text(", unless P = NP.".to_string())]);
         assert_eq!(res, expected);
     } else {
         panic!("Got {res:?}")
@@ -676,23 +660,23 @@ fn test_simple_list() {
     if let Ok(pd) = res {
         assert_eq!(
             pd,
-            ParsedDocument::ParsedText(vec![DocumentComponent::new(DocumentElement::List(
+            ParsedDocument::ParsedText(vec![DocumentComponent::List(
                 vec![
                     ListElem {
-                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text(
-                            "item 1"
+                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::Text(
+                            "item 1".to_string()
                         )]),
                         children: vec![]
                     },
                     ListElem {
-                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::new_text(
-                            "item 2"
+                        contents: ParsedDocument::ParsedText(vec![DocumentComponent::Text(
+                            "item 2".to_string()
                         )]),
                         children: vec![]
                     }
                 ],
                 false
-            )),])
+            ),])
         );
     } else {
         panic!("Error: {res:?}");
@@ -774,11 +758,11 @@ fn test_multi_property() {
     use crate::document_component::PropValue;
     let text = "property::= [test]";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+    let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
         false,
         vec![PropValue::String("test".to_string())],
-    )]));
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -794,11 +778,8 @@ fn test_multi_property() {
 fn test_multi_property_empty() {
     let text = "property::= []";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
-        "property".to_string(),
-        false,
-        vec![],
-    )]));
+    let prop =
+        DocumentComponent::Properties(vec![Property::new("property".to_string(), false, vec![])]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -816,11 +797,11 @@ fn test_multi_property_single_char() {
     use crate::document_component::PropValue;
     let text = "p ::= [a]";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+    let prop = DocumentComponent::Properties(vec![Property::new(
         "p".to_string(),
         false,
         vec![PropValue::String("a".to_string())],
-    )]));
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -837,7 +818,7 @@ fn test_single_property_file_name() {
     use crate::document_component::PropValue;
     let text = "property::= [test](../test.md)";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+    let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
         true,
         vec![PropValue::FileLink(
@@ -845,7 +826,7 @@ fn test_single_property_file_name() {
             None,
             Some("test".to_string()),
         )],
-    )]));
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -863,7 +844,7 @@ fn test_multi_property_file_name() {
     use crate::document_component::PropValue;
     let text = "property::= [[test](../test.md)]";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+    let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
         false,
         vec![PropValue::FileLink(
@@ -871,7 +852,7 @@ fn test_multi_property_file_name() {
             None,
             Some("test".to_string()),
         )],
-    )]));
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -889,11 +870,11 @@ fn test_property_text() {
     use crate::document_component::PropValue;
     let text = "property ::= value";
     let res = parse_zk_text(text, &None);
-    let prop = DocumentComponent::new(DocumentElement::Properties(vec![Property::new(
+    let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
         true,
         vec![PropValue::String("value".to_string())],
-    )]));
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);

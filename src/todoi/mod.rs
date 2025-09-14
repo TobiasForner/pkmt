@@ -20,8 +20,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     document_component::{
-        DocumentComponent, DocumentElement, FileInfo, ListElem, MentionedFile, ParsedDocument,
-        PropValue,
+        DocumentComponent, FileInfo, ListElem, MentionedFile, ParsedDocument, PropValue,
     },
     logseq_parsing::parse_logseq_file,
     parse::{TextMode, parse_all_files_in_dir, parse_file},
@@ -54,7 +53,7 @@ impl LogSeqTemplates {
     /// returns the list element containing the properties matching the template name
     pub fn get_template_comp(&self, template_name: &str) -> Option<ListElem> {
         get_list_elem_with_doc_elem(&self.templates_pd, &|elem| match elem {
-            DocumentElement::Properties(props) => props.iter().any(|p| {
+            DocumentComponent::Properties(props) => props.iter().any(|p| {
                 p.has_name("template") && p.has_value(&PropValue::String(template_name.to_string()))
             }),
             _ => false,
@@ -64,13 +63,15 @@ impl LogSeqTemplates {
     pub fn template_names(&self) -> Vec<String> {
         let mut res = vec![];
         self.templates_pd
-            .get_all_document_components(&|c: &DocumentComponent| match &c.element {
-                DocumentElement::Properties(props) => props.iter().any(|p| p.has_name("template")),
+            .get_all_document_components(&|c: &DocumentComponent| match &c {
+                DocumentComponent::Properties(props) => {
+                    props.iter().any(|p| p.has_name("template"))
+                }
                 _ => false,
             })
             .iter()
             .for_each(|c| {
-                if let DocumentElement::Properties(props) = &c.element
+                if let DocumentComponent::Properties(props) = &c
                     && let Some(p) = props.iter().find(|p| p.has_name("template"))
                 {
                     p.values.iter().for_each(|v| {
@@ -88,14 +89,9 @@ impl LogSeqTemplates {
 
 fn get_list_elem_with_doc_elem(
     pd: &ParsedDocument,
-    elem_selector: &dyn Fn(&DocumentElement) -> bool,
+    elem_selector: &dyn Fn(&DocumentComponent) -> bool,
 ) -> Option<ListElem> {
-    pd.get_list_elem(&|le| {
-        le.contents
-            .components()
-            .iter()
-            .any(|dc| elem_selector(&dc.element))
-    })
+    pd.get_list_elem(&|le| le.contents.components().iter().any(|dc| elem_selector(&dc)))
 }
 
 /// gathers tasks and calls the correct handler
@@ -290,10 +286,8 @@ impl ZkHandler {
         task_data: &TaskData,
         file_dir: &Option<PathBuf>,
     ) -> bool {
-        let frontmatter = pd.get_document_component_mut(&|dc| {
-            let elem = dc.get_element();
-            matches!(elem, DocumentElement::Frontmatter(_))
-        });
+        let frontmatter =
+            pd.get_document_component_mut(&|dc| matches!(dc, DocumentComponent::Frontmatter(_)));
 
         let tags_to_add: Vec<String> = task_data
             .get_tags()
@@ -302,7 +296,7 @@ impl ZkHandler {
             .collect();
 
         let tags_success = if let Some(dc) = frontmatter {
-            if let DocumentElement::Frontmatter(properties) = dc.get_element_mut() {
+            if let DocumentComponent::Frontmatter(properties) = dc {
                 for p in properties {
                     if p.has_name("tags") {
                         p.add_values_parse(&tags_to_add, &TextMode::Zk, file_dir);
@@ -389,7 +383,7 @@ impl ZkHandler {
             .iter()
             .flat_map(|pd| {
                 pd.get_all_document_components(&|dc: &DocumentComponent| {
-                    if let DocumentElement::Properties(props) = dc.get_element() {
+                    if let DocumentComponent::Properties(props) = dc {
                         props.iter().any(|p| p.has_name("url"))
                     } else {
                         false
@@ -401,7 +395,7 @@ impl ZkHandler {
         let tmp: Vec<String> = prop_dcs
             .iter()
             .filter_map(|dc| {
-                if let DocumentElement::Properties(props) = dc.get_element() {
+                if let DocumentComponent::Properties(props) = dc {
                     let tmp = props.iter().filter(|p| p.has_name("url")).flat_map(|p| {
                         p.values.iter().filter_map(|v| match v {
                             PropValue::String(s) => Some(s.clone()),
@@ -426,12 +420,12 @@ impl ZkHandler {
         values: &[String],
         file_dir: &Option<PathBuf>,
     ) {
-        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
-            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+        let property = pd.get_document_component_mut(&|dc| match dc {
+            DocumentComponent::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
         if let Some(prop) = property
-            && let DocumentElement::Properties(props) = prop.get_element_mut()
+            && let DocumentComponent::Properties(props) = prop
         {
             props.iter_mut().for_each(|p| {
                 if p.has_name(prop_name) {
@@ -451,12 +445,12 @@ impl ZkHandler {
         values: &[PropValue],
         file_dir: &Option<PathBuf>,
     ) {
-        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
-            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+        let property = pd.get_document_component_mut(&|dc| match dc {
+            DocumentComponent::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
         if let Some(prop) = property
-            && let DocumentElement::Properties(props) = prop.get_element_mut()
+            && let DocumentComponent::Properties(props) = prop
         {
             props.iter_mut().for_each(|p| {
                 if p.has_name(prop_name) {
@@ -512,15 +506,12 @@ impl TaskDataHandler for ZkHandler {
             debug!("added {task_data:?} to pd with result: {text:?}");
 
             std::fs::write(&zk_file, text).context(format!("Failed to write to {zk_file:?}!"))?;
-            let mention = DocumentComponent::new(DocumentElement::FileLink(
-                MentionedFile::FilePath(zk_file),
-                None,
-                Some(title),
-            ));
-            let journal_mention = DocumentComponent::new(DocumentElement::List(
+            let mention =
+                DocumentComponent::FileLink(MentionedFile::FilePath(zk_file), None, Some(title));
+            let journal_mention = DocumentComponent::List(
                 vec![ListElem::new(ParsedDocument::ParsedText(vec![mention]))],
                 false,
-            ));
+            );
             let success = self.append_to_zk_journal(journal_mention)?;
             Ok(success)
         } else {
@@ -571,12 +562,12 @@ fn add_to_logseq(
 #[instrument]
 fn fill_all_props_le(pd: &mut ListElem, properties: &[(&str, Vec<PropValue>)]) {
     properties.iter().for_each(|(prop_name, values)| {
-        let property = pd.get_document_component_mut(&|dc| match dc.get_element() {
-            DocumentElement::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
+        let property = pd.get_document_component_mut(&|dc| match dc {
+            DocumentComponent::Properties(props) => props.iter().any(|p| p.has_name(prop_name)),
             _ => false,
         });
         if let Some(prop) = property
-            && let DocumentElement::Properties(props) = prop.get_element_mut()
+            && let DocumentComponent::Properties(props) = prop
         {
             props.iter_mut().for_each(|p| {
                 if p.has_name(prop_name) {
@@ -694,14 +685,13 @@ impl TaskDataHandler for LogSeqHandler {
                     && let Some(le) = le.children.get_mut(0)
                 {
                     let embed = if url.contains("/shorts/") {
-                        DocumentComponent::new_text(url)
+                        DocumentComponent::Text(url.to_string())
                     } else {
-                        DocumentComponent::new_text(&format!("{{{{video {url}}}}}"))
+                        DocumentComponent::Text(format!("{{{{video {url}}}}}"))
                     };
                     le.contents.add_component(embed);
                 }
-                let yt_block =
-                    DocumentComponent::new(DocumentElement::List(vec![yt_template], false));
+                let yt_block = DocumentComponent::List(vec![yt_template], false);
                 self.todays_journal.add_component(yt_block);
             }
             TaskData::Sbs(url, author, title, tags, description) => {
@@ -733,7 +723,7 @@ impl TaskDataHandler for LogSeqHandler {
                         properties.push(("description", vec![PropValue::String(title.clone())]));
                     }
                     fill_all_props_le(&mut comp, &properties);
-                    let comp = DocumentComponent::new(DocumentElement::List(vec![comp], false));
+                    let comp = DocumentComponent::List(vec![comp], false);
                     self.todays_journal.add_component(comp);
                 }
             }
@@ -748,7 +738,7 @@ impl TaskDataHandler for LogSeqHandler {
                     ("url", vec![PropValue::String(url.to_string())]),
                 ];
                 fill_all_props_le(&mut temp, properties);
-                let list = DocumentComponent::new(DocumentElement::List(vec![temp], false));
+                let list = DocumentComponent::List(vec![temp], false);
                 self.todays_journal.add_component(list);
             }
             TaskData::Interactive(template_name, url, title, tags, sources) => {
@@ -778,7 +768,7 @@ impl TaskDataHandler for LogSeqHandler {
                     properties.push(("url", vec![PropValue::String(url.to_string())]))
                 }
                 fill_all_props_le(&mut comp, &properties);
-                let list = DocumentComponent::new(DocumentElement::List(vec![comp], false));
+                let list = DocumentComponent::List(vec![comp], false);
                 self.todays_journal.add_component(list);
             }
             _ => {
@@ -1012,7 +1002,7 @@ fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bo
     parsed_documents.iter().for_each(|pd| {
         if pd
             .get_document_component(&|dc: &DocumentComponent| {
-                if let DocumentElement::Properties(props) = dc.get_element() {
+                if let DocumentComponent::Properties(props) = dc {
                     props.iter().any(|p| {
                         p.has_name("url") && p.has_value(&PropValue::String(url.to_string()))
                     })

@@ -9,8 +9,8 @@ use test_log::test;
 
 use crate::{
     document_component::{
-        DocumentComponent, DocumentElement, ListElem, MentionedFile, ParsedDocument, PropValue,
-        Property, collapse_text,
+        DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropValue, Property,
+        collapse_text,
     },
     md_parsing::{ListElement, MdComponent, parse_md_text},
 };
@@ -35,10 +35,7 @@ pub fn parse_logseq_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Parse
     let mut components = vec![];
     parsed_md.into_iter().try_for_each(|comp| match comp {
         MdComponent::Heading(level, text) => {
-            components.push(DocumentComponent::new(DocumentElement::Heading(
-                level as u16,
-                text,
-            )));
+            components.push(DocumentComponent::Heading(level as u16, text));
             Ok::<(), anyhow::Error>(())
         }
         MdComponent::Text(text) => {
@@ -52,10 +49,10 @@ pub fn parse_logseq_text(text: &str, file_dir: &Option<PathBuf>) -> Result<Parse
                 .iter()
                 .map(|le| parse_md_list_element(le, file_dir))
                 .collect();
-            components.push(DocumentComponent::new(DocumentElement::List(
+            components.push(DocumentComponent::List(
                 list_elements?,
                 terminated_by_blank_line,
-            )));
+            ));
             Ok(())
         }
     })?;
@@ -137,16 +134,16 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
                     // element
                     if new_line_or_whitespace {
                         let (heading, rem) = parse_heading(&mut lexer);
-                        components.push(DocumentComponent::new(heading));
-                        components.push(DocumentComponent::new_text(&rem));
+                        components.push(heading);
+                        components.push(DocumentComponent::Text(rem));
                     } else {
-                        components.push(DocumentComponent::new_text("#"));
+                        components.push(DocumentComponent::Text("#".to_string()));
                     }
                 }
-                Space => components.push(DocumentComponent::new_text(lexer.slice())),
+                Space => components.push(DocumentComponent::Text(lexer.slice().to_string())),
                 Newline => {
                     new_line_or_whitespace = true;
-                    components.push(DocumentComponent::new_text(lexer.slice()));
+                    components.push(DocumentComponent::Text(lexer.slice().to_string()));
                 }
                 PropertyStart => {
                     new_line_or_whitespace = false;
@@ -158,16 +155,14 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
                     new_line_or_whitespace = false;
                     let name = parse_file_mention(&mut lexer);
                     let mf = MentionedFile::FileName(name?);
-                    let element = DocumentElement::FileEmbed(mf, None);
-                    let comp = DocumentComponent::new(element);
+                    let comp = DocumentComponent::FileEmbed(mf, None);
                     components.push(comp);
                 }
                 OpenDoubleBraces => {
                     new_line_or_whitespace = false;
                     let name = parse_file_mention(&mut lexer);
                     let mf = MentionedFile::FileName(name?);
-                    let element = DocumentElement::FileLink(mf, None, None);
-                    let comp = DocumentComponent::new(element);
+                    let comp = DocumentComponent::FileLink(mf, None, None);
                     components.push(comp);
                 }
                 TripleBackQuote => {
@@ -180,10 +175,10 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
                         } else {
                             (None, inner.as_str())
                         };
-                    components.push(DocumentComponent::new(DocumentElement::CodeBlock(
+                    components.push(DocumentComponent::CodeBlock(
                         remaining.trim().to_string(),
                         code_type,
-                    )));
+                    ));
                 }
                 QuoteEnvStart => {
                     new_line_or_whitespace = false;
@@ -192,19 +187,19 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
 
                     let mut rec_components = rec.into_components();
                     if rec_components.len() == 1
-                        && let DocumentElement::List(list_elements, _) = &rec_components[0].element
+                        && let DocumentComponent::List(list_elements, _) = &rec_components[0]
                         && list_elements.len() == 1
                     {
                         rec_components = list_elements[0].contents.components().to_vec();
                     };
 
-                    components.push(DocumentComponent::new(DocumentElement::Admonition(
+                    components.push(DocumentComponent::Admonition(
                         rec_components,
                         HashMap::new(),
-                    )))
+                    ))
                 }
                 _ => {
-                    components.push(DocumentComponent::new_text(lexer.slice()));
+                    components.push(DocumentComponent::Text(lexer.slice().to_string()));
                 }
             }
         } else {
@@ -222,14 +217,14 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
             })
             .collect();
 
-        let props = DocumentComponent::new(DocumentElement::Properties(props));
+        let props = DocumentComponent::Properties(props);
         components.insert(0, props);
     }
     let pd = ParsedDocument::ParsedText(components);
     Ok(pd)
 }
 
-fn parse_heading(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> (DocumentElement, String) {
+fn parse_heading(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> (DocumentComponent, String) {
     let mut start = true;
     let mut text = String::new();
     let mut heading_level = 1;
@@ -237,7 +232,7 @@ fn parse_heading(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> (DocumentElement, S
         match result {
             Ok(LogSeqBlockToken::Newline) => {
                 return (
-                    DocumentElement::Heading(heading_level, text.trim().to_string()),
+                    DocumentComponent::Heading(heading_level, text.trim().to_string()),
                     lexer.slice().to_string(),
                 );
             }
@@ -257,7 +252,7 @@ fn parse_heading(lexer: &mut Lexer<'_, LogSeqBlockToken>) -> (DocumentElement, S
     }
 
     (
-        DocumentElement::Heading(heading_level, text.trim().to_string()),
+        DocumentComponent::Heading(heading_level, text.trim().to_string()),
         lexer.slice().to_string(),
     )
 }
@@ -326,25 +321,25 @@ fn construct_block_error_details(lexer: &Lexer<'_, LogSeqBlockToken>) -> String 
 
 #[test]
 fn test_simple_list_parsing() {
-    use DocumentElement::*;
+    use DocumentComponent::*;
     use MentionedFile::FileName;
     use ParsedDocument::ParsedText;
     let text = "- first block test [[mention]]\n    - nested block";
 
     let res = parse_logseq_text(text, &None).unwrap();
-    let expected = ParsedText(vec![DocumentComponent::new(List(
+    let expected = ParsedText(vec![List(
         vec![ListElem {
             contents: ParsedText(vec![
-                DocumentComponent::new_text("first block test "),
-                DocumentComponent::new(FileLink(FileName("mention".to_string()), None, None)),
+                Text("first block test ".to_string()),
+                FileLink(FileName("mention".to_string()), None, None),
             ]),
             children: vec![ListElem {
-                contents: ParsedText(vec![DocumentComponent::new_text("nested block")]),
+                contents: ParsedText(vec![Text("nested block".to_string())]),
                 children: vec![],
             }],
         }],
         false,
-    ))]);
+    )]);
 
     assert_eq!(res, expected);
 
