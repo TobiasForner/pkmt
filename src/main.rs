@@ -57,6 +57,7 @@ enum Commands {
         #[arg(long)]
         imdir: Option<PathBuf>,
 
+        /// image output directory
         #[arg(long)]
         imout: Option<PathBuf>,
     },
@@ -73,12 +74,13 @@ enum Commands {
         #[arg(required = true)]
         todo_marker: String,
     },
+    /// inspect the files in the subtree rooted at root_dir and report issues
     Inspect {
         /// root directory to inspect
         #[arg(required = true)]
         root_dir: PathBuf,
     },
-    Test {},
+    /// todoist import
     Todoi {
         #[arg(required = false)]
         graph_root: Option<PathBuf>,
@@ -87,10 +89,12 @@ enum Commands {
         #[arg(short, long, required = false)]
         mode: Option<TextMode>,
     },
+    /// config for todoist import
     TodoiConfig {
         #[clap(subcommand)]
         tcfg_command: TCfgCommand,
     },
+    /// todoi creator manipulation
     Creator {
         #[arg(required = true)]
         root_dir: PathBuf,
@@ -105,25 +109,30 @@ enum Commands {
 
 #[derive(Clone, Subcommand)]
 enum TCfgCommand {
+    /// show config paths
     ShowPaths,
+    /// add tags to a youtube channel
     AddYtTags {
         #[arg(required = true)]
         channel: String,
         #[clap(required = true)]
         tags: Vec<String>,
     },
+    /// add keyword-based tags
     AddKwTags {
         #[arg(required = true)]
         kw: String,
         #[clap(required = true)]
         tags: Vec<String>,
     },
+    /// add tags based on url
     AddUrlTags {
         #[arg(required = true)]
         url: String,
         #[clap(required = true)]
         tags: Vec<String>,
     },
+    /// add sources to a url
     AddUrlSources {
         #[arg(required = true)]
         url: String,
@@ -134,11 +143,15 @@ enum TCfgCommand {
 
 #[derive(Clone, Subcommand)]
 enum CreatorCommand {
+    /// delete creator file
     Delete,
+    /// Overwrite creator file
     Overwrite {
         #[arg(required = true)]
         new_file: PathBuf,
     },
+    /// shows the creator path for the given name. If relative is passed the output path is
+    /// relative to that path
     ShowFile {
         #[arg(short, long)]
         relative: Option<PathBuf>,
@@ -222,11 +235,6 @@ fn run() -> Result<()> {
         Some(Commands::Inspect { root_dir }) => {
             list_empty_files(root_dir.clone())?;
             similar_file_names(root_dir, 4);
-            Ok(())
-        }
-        Some(Commands::Test {}) => {
-            println!("Only prints this message atm");
-            md_parsing::parse_md_text("test")?;
             Ok(())
         }
         Some(Commands::Convert {
