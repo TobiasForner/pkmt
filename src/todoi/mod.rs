@@ -91,7 +91,7 @@ fn get_list_elem_with_doc_elem(
     pd: &ParsedDocument,
     elem_selector: &dyn Fn(&DocumentComponent) -> bool,
 ) -> Option<ListElem> {
-    pd.get_list_elem(&|le| le.contents.components().iter().any(|dc| elem_selector(&dc)))
+    pd.get_list_elem(&|le| le.contents.components().iter().any(elem_selector))
 }
 
 /// gathers tasks and calls the correct handler
