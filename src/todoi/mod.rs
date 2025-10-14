@@ -304,9 +304,14 @@ impl ZkHandler {
                 }
                 true
             } else {
+                println!(
+                    "Failed to find tags in template: {}",
+                    pd.to_string(TextMode::Zk, &None)
+                );
                 false
             }
         } else {
+            println!("Failed to find frontmatter in template: {pd:?}",);
             false
         };
         if tags_success {

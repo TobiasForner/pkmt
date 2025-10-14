@@ -124,6 +124,9 @@ impl ParsedDocument {
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
         for comp in self.components() {
+            if selector(comp) {
+                return Some(comp.clone());
+            }
             let rec = comp.get_document_component(selector);
             if rec.is_some() {
                 return rec;
@@ -169,6 +172,9 @@ impl ParsedDocument {
     ) -> Vec<DocumentComponent> {
         let mut res = vec![];
         for comp in self.components() {
+            if selector(comp) {
+                res.push(comp.clone());
+            }
             let mut rec = comp.get_all_document_components(selector);
             res.append(&mut rec);
         }
@@ -197,6 +203,9 @@ impl ParsedDocument {
             ParsedText(comps) => comps,
         };
         for comp in comps.iter_mut() {
+            if selector(comp) {
+                return Some(comp);
+            }
             let rec = comp.get_document_component_mut(selector);
             if rec.is_some() {
                 return rec;
