@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use todoi::{get_zk_creator_file, set_zk_creator_file};
+use todoi::handlers::zk_handler::{get_zk_creator_file, set_zk_creator_file};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 extern crate tracing;
 
