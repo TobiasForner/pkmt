@@ -8,7 +8,7 @@ use test_log::test;
 
 use crate::{
     document_component::{ListElem, Property},
-    md_parsing::{ListElement, MdComponent, parse_md_text},
+    parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
     util::{apply_substitutions, file_link_pattern, link_name_pattern},
 };
 use anyhow::{Context, Result, bail};
@@ -357,7 +357,7 @@ fn parse_property(
             name,
             false,
             &values,
-            crate::parse::TextMode::Zk,
+            crate::parsing::TextMode::Zk,
             file_dir,
         ));
     } else {
@@ -365,7 +365,7 @@ fn parse_property(
             name,
             true,
             &[prop_val_text.to_string()],
-            crate::parse::TextMode::Zk,
+            crate::parsing::TextMode::Zk,
             file_dir,
         ));
     }
@@ -421,7 +421,7 @@ fn parse_frontmatter(
                             name.to_string(),
                             !is_multi,
                             &vals,
-                            crate::parse::TextMode::Zk,
+                            crate::parsing::TextMode::Zk,
                             file_dir,
                         ));
                         Ok(())

@@ -15,8 +15,7 @@ use crate::{
     document_component::{
         DocumentComponent, FileInfo, ListElem, MentionedFile, ParsedDocument, PropValue,
     },
-    parse::{TextMode, parse_file},
-    zk_parsing::{self},
+    parsing::{TextMode, parse_file, zk_parsing},
 };
 
 #[derive(Debug)]
@@ -390,8 +389,8 @@ pub fn set_zk_creator_file(name: &str, new_file: &PathBuf) -> Result<()> {
 #[ignore = "Test is hard to get right as the logic relies on the zk lookup file. A proper test would need some restructuring"]
 #[test]
 fn test_add_to_yt_pd() {
+    use crate::parsing::zk_parsing::parse_zk_text;
     use crate::todoi::handlers::zk_handler::ZkHandler;
-    use crate::zk_parsing::parse_zk_text;
     // PROBLEM: this test currently relies on a bug introduced earlier: test_channel has file "" in
     // the lookup file.
     // Maybe this test should be disabled as it seems difficult to fix.

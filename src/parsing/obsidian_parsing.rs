@@ -8,7 +8,7 @@ use tracing::{debug, instrument};
 
 use crate::{
     document_component::ListElem,
-    md_parsing::{ListElement, MdComponent, parse_md_text},
+    parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
     util::apply_substitutions,
 };
 use anyhow::{Context, Result, bail};

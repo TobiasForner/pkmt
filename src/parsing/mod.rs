@@ -1,14 +1,15 @@
 use anyhow::Result;
-use clap::{builder::PossibleValue, ValueEnum};
+use clap::{ValueEnum, builder::PossibleValue};
 use std::path::PathBuf;
+pub mod logseq_parsing;
+pub mod md_parsing;
+pub mod obsidian_parsing;
+pub mod zk_parsing;
 
-use crate::{
-    document_component::ParsedDocument,
-    logseq_parsing::{parse_logseq_file, parse_logseq_text},
-    obsidian_parsing::{parse_obsidian_file, parse_obsidian_text},
-    util::files_in_tree,
-    zk_parsing::{parse_zk_file, parse_zk_text},
-};
+use crate::{document_component::ParsedDocument, util::files_in_tree};
+use logseq_parsing::{parse_logseq_file, parse_logseq_text};
+use obsidian_parsing::{parse_obsidian_file, parse_obsidian_text};
+use zk_parsing::{parse_zk_file, parse_zk_text};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum TextMode {

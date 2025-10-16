@@ -13,7 +13,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     document_component::{DocumentComponent, ListElem, ParsedDocument, PropValue},
-    parse::{TextMode, parse_all_files_in_dir},
+    parsing::{TextMode, parse_all_files_in_dir},
     todoi::{
         config::Config,
         handlers::handle_tasks_main,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
     document_component::{DocumentComponent, PropValue},
-    parse::{TextMode, parse_all_files_in_dir},
+    parsing::{TextMode, parse_all_files_in_dir},
     todoi::{
         TaskData,
         config::Config,

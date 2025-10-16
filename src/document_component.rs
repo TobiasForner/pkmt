@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
 
 use crate::{
-    parse::{self, TextMode, parse_file},
+    parsing::{self, TextMode, parse_file},
     util::{
         self, SPACES_PER_INDENT, ends_with_blank_line, files_in_tree, indent_spaces,
         starts_with_blank_line, trim_like_first_line_plus,
@@ -492,7 +492,7 @@ impl Property {
     }
 
     fn try_prop_value_parse(val: &str, mode: &TextMode, file_dir: &Option<PathBuf>) -> PropValue {
-        if let Ok(pd) = parse::parse_text(val, mode, file_dir) {
+        if let Ok(pd) = parsing::parse_text(val, mode, file_dir) {
             let comps = pd.components();
             if let [comp] = &comps[..]
                 && let DocumentComponent::FileLink(mf, sec, rename) = &comp

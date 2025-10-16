@@ -12,7 +12,7 @@ use crate::todoi::{
 };
 use crate::{
     document_component::{DocumentComponent, ListElem, ParsedDocument, PropValue},
-    logseq_parsing::parse_logseq_file,
+    parsing::logseq_parsing::parse_logseq_file,
 };
 
 #[derive(Debug)]

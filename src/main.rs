@@ -9,7 +9,6 @@ mod file_checklist;
 use document_component::{FileInfo, convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
-use parse::TextMode;
 use util::files_in_tree;
 
 use std::{collections::HashSet, fmt::Debug, path::PathBuf};
@@ -17,14 +16,11 @@ use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 use crate::todoi::config::Tags;
 mod document_component;
 mod inspect;
-mod logseq_parsing;
 
-mod md_parsing;
-mod obsidian_parsing;
-mod parse;
+use parsing::TextMode;
+mod parsing;
 mod todoi;
 mod util;
-mod zk_parsing;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

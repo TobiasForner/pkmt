@@ -12,7 +12,7 @@ use crate::{
         DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropValue, Property,
         collapse_text,
     },
-    md_parsing::{ListElement, MdComponent, parse_md_text},
+    parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
 };
 
 pub fn parse_logseq_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
