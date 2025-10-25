@@ -927,12 +927,12 @@ fn test_paranthesis_in_link_name() {
 
 #[test]
 fn test_link_with_special() {
-    let text = "[Why don't movies look like *movies* anymore?](../../uuiv-why-dont-movies-look-like-movies-anymore.md)";
+    let text = "[Why don't movies look like *movies* anymore? | foo_bar](../../uuiv-why-dont-movies-look-like-movies-anymore.md)";
     let res = parse_zk_text(text, &None).unwrap();
     let expected = ParsedDocument::ParsedText(vec![DocumentComponent::FileLink(
         MentionedFile::FileName("../../uuiv-why-dont-movies-look-like-movies-anymore.md".into()),
         None,
-        Some("Why don't movies look like *movies* anymore?".to_string()),
+        Some("Why don't movies look like *movies* anymore? | foo_bar".to_string()),
     )]);
     assert_eq!(res, expected);
     let res = res.to_zk_text(&None);
