@@ -236,7 +236,8 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                                     break;
                                 } else if consumed.len() > cap_len {
                                     bail!(
-                                        "Consumed too much while parsing file link!: {consumed:?}"
+                                        "Consumed too much while parsing file link!: consumed {consumed:?}, but parsed {:?}",
+                                        c.get(0).unwrap()
                                     );
                                 }
                             }
@@ -918,6 +919,20 @@ fn test_paranthesis_in_link_name() {
         MentionedFile::FileName("some_file.md".into()),
         None,
         Some("link (name)".to_string()),
+    )]);
+    assert_eq!(res, expected);
+    let res = res.to_zk_text(&None);
+    assert_eq!(text, res);
+}
+
+#[test]
+fn test_link_with_special() {
+    let text = "[Why don't movies look like *movies* anymore?](../../uuiv-why-dont-movies-look-like-movies-anymore.md)";
+    let res = parse_zk_text(text, &None).unwrap();
+    let expected = ParsedDocument::ParsedText(vec![DocumentComponent::FileLink(
+        MentionedFile::FileName("../../uuiv-why-dont-movies-look-like-movies-anymore.md".into()),
+        None,
+        Some("Why don't movies look like *movies* anymore?".to_string()),
     )]);
     assert_eq!(res, expected);
     let res = res.to_zk_text(&None);
