@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::str::FromStr;
 
+/// returns (title, channel)
 pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
     let client = reqwest::Client::new();
     let resolved = client.get(video_url).send();
@@ -64,4 +65,18 @@ pub fn youtube_playlist_details(playlist_url: &str, api_key: &str) -> Result<(St
         return Ok((format!("{title}: {description}"), channel));
     }
     bail!("Could not extract details from playlist url {playlist_url}!")
+}
+
+#[test]
+fn get_yt_details() {
+    use crate::todoi::config::Config;
+    let config = Config::load().unwrap();
+    let api_key = &config.keys.yt_api_key;
+    let yt_url = "https://www.youtube.com/watch?v=NkM6wQL2UvM";
+    let details = youtube_details(yt_url, api_key).unwrap();
+    assert_eq!(
+        details.0,
+        "The Kubernetes Homelab That Prints Job Offers (Simple & Proven)"
+    );
+    assert_eq!(details.1, "Mischa van den Burg");
 }
