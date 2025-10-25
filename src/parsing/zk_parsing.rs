@@ -217,8 +217,11 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                             debug!("Found file link {file_link:?}");
                             res.push(file_link);
 
-                            // consume tokens from the lexer until we have consumed the first
-                            // closing paranthesis
+                            let cap_len = c.get(0).unwrap().len();
+                            let mut consumed = String::new();
+
+                            // consume tokens from the lexer until we have consumed the
+                            // closing paranthesis of the file link
                             while let Some(token) = lexer.next() {
                                 if token.is_err() {
                                     bail!(
@@ -226,11 +229,15 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                                         construct_error_details(&lexer)
                                     )
                                 };
+
                                 let slice = lexer.slice();
-                                if slice.ends_with(')') {
+                                consumed.push_str(slice);
+                                if consumed.len() == cap_len {
                                     break;
-                                } else if slice.contains(')') {
-                                    bail!("No slice should contain ')', but got {slice:?}");
+                                } else if consumed.len() > cap_len {
+                                    bail!(
+                                        "Consumed too much while parsing file link!: {consumed:?}"
+                                    );
                                 }
                             }
                         } else {
@@ -899,6 +906,20 @@ fn test_link_in_list() {
 fn test_text_after_list() {
     let text = "- a\n- b\n\nsome other text";
     let res = parse_zk_text(text, &None).unwrap();
+    let res = res.to_zk_text(&None);
+    assert_eq!(text, res);
+}
+
+#[test]
+fn test_paranthesis_in_link_name() {
+    let text = "[link (name)](some_file.md)";
+    let res = parse_zk_text(text, &None).unwrap();
+    let expected = ParsedDocument::ParsedText(vec![DocumentComponent::FileLink(
+        MentionedFile::FileName("some_file.md".into()),
+        None,
+        Some("link (name)".to_string()),
+    )]);
+    assert_eq!(res, expected);
     let res = res.to_zk_text(&None);
     assert_eq!(text, res);
 }
