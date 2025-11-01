@@ -6,7 +6,7 @@ mod youtube_details;
 use scraper::{Html, Selector};
 use std::{fmt::Debug, path::PathBuf, vec};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use interactive::get_interactive_data;
 use regex::Regex;
 use tracing::{debug, info, instrument};
@@ -92,6 +92,16 @@ fn get_task_data_non_interactive(
         TaskData::Unhandled => (handle_youtube_playlist(task, config), task),
         _ => (td, task),
     });
+    let tasks = tasks.map(|(td, task)| match td {
+        TaskData::Unhandled => {
+            if let Ok(td) = handle_reddit_post(task, config) {
+                (td, task)
+            } else {
+                (TaskData::Unhandled, task)
+            }
+        }
+        _ => (td, task),
+    });
     tasks.map(|(td, task)| (td, task.clone())).collect()
 }
 
@@ -138,6 +148,8 @@ pub enum TaskData {
     ),
     /// url, channel, title
     YtPlaylist(String, String, String),
+    /// url, title, tags
+    Reddit(String, String, Vec<String>),
     /// template_name, optional url, optional title, tags, sources
     Interactive(
         String,
@@ -156,6 +168,7 @@ impl TaskData {
             Sbs(_, _, title, _, _) => title.clone(),
             YtPlaylist(_, _, title) => Some(title.to_string()),
             Interactive(_, _, title, _, _) => title.clone(),
+            Reddit(_, title, _) => Some(title.to_string()),
             _ => None,
         }
     }
@@ -167,6 +180,7 @@ impl TaskData {
             Sbs(_, _, _, tags, _) => tags.clone(),
             YtPlaylist(_, _, _) => vec![],
             Interactive(_, _, _, tags, _) => tags.clone(),
+            Reddit(_, _, tags) => tags.clone(),
         }
     }
 
@@ -178,6 +192,7 @@ impl TaskData {
             Sbs(url, _, _, _, _) => Some(url),
             YtPlaylist(url, _, _) => Some(url),
             Interactive(_, url, _, _, _) => url.as_deref(),
+            Reddit(url, _, _) => Some(url),
         }
     }
 }
@@ -278,6 +293,37 @@ fn handle_youtube_playlist(task: &TodoistTask, config: &Config) -> TaskData {
         }
     }
     TaskData::Unhandled
+}
+
+pub fn handle_reddit_post(task: &TodoistTask, config: &Config) -> Result<TaskData> {
+    let reddit_re = Regex::new(r"https://www.reddit.com/r/[a-zA-Z0-9]+/s/[a-zA-Z0-9?=&]+").unwrap();
+    if let Some(c) = reddit_re.captures(&task.content)
+        && let Some(url) = c.get(0)
+    {
+        let url = url.as_str();
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (platform; rv:gecko-version) Gecko/gecko-trail Firefox/18.0")
+            .build()?;
+        let resolved = client.get(url).send();
+        let runtime = tokio::runtime::Runtime::new()?;
+        let res = runtime.block_on(resolved);
+        if let Ok(res) = res {
+            let text = runtime.block_on(res.text())?;
+            let doc = Html::parse_document(&text);
+            if let Ok(selector) = Selector::parse("shreddit-title") {
+                let mut selection = doc.select(&selector);
+                let sel = selection
+                    .next()
+                    .context("Failed to find title of reddit post")?;
+                let title = sel.value().attr("title");
+                if let Some(title) = title {
+                    let tags = config.get_keyword_tags(title);
+                    return Ok(TaskData::Reddit(url.to_string(), title.to_string(), tags));
+                }
+            }
+        }
+    }
+    bail!("Failed to extract reddit data")
 }
 
 fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bool> {

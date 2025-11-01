@@ -134,6 +134,9 @@ impl ZkHandler {
                         self.fill_property(pd, "description", &[desc.to_string()], file_dir);
                     }
                 }
+                TaskData::Reddit(url, _, _) => {
+                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                }
                 TaskData::Youtube(url, title, channel, _) => {
                     self.fill_property(pd, "url", &[url.to_string()], file_dir);
                     let success = self.fill_in_creator(pd, channel, "channel", file_dir);
@@ -256,6 +259,7 @@ impl TaskDataHandler for ZkHandler {
             TaskData::Interactive(template_name, _, _, _, _) => {
                 self.root_dir.join(".zk/templates").join(template_name)
             }
+            TaskData::Reddit(_, _, _) => self.root_dir.join(".zk/templates/article.md"),
             _ => todo!("not implemented: conversion of {task_data:?} to zk."),
         };
         debug!("using template {template_file:?}");

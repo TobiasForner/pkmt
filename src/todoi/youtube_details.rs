@@ -29,7 +29,6 @@ pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String
             .query(&[("key", api_key), ("part", "snippet"), ("id", &id)])
             .send();
 
-        let runtime = tokio::runtime::Runtime::new()?;
         let res = runtime.block_on(res);
 
         let text = runtime.block_on(res?.text())?;
