@@ -11,7 +11,7 @@ use file_checklist::checklist_for_tree;
 use inspect::{list_empty_files, similar_file_names};
 use util::files_in_tree;
 
-use std::{collections::HashSet, fmt::Debug, path::PathBuf};
+use std::{collections::HashSet, path::PathBuf};
 
 use crate::todoi::config::Tags;
 mod document_component;
@@ -154,10 +154,6 @@ enum CreatorCommand {
     },
 }
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {}
-
 fn main() {
     let res = run();
     if res.is_err() {
@@ -168,10 +164,19 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+    let base_dirs = directories::BaseDirs::new();
+    if let Some(dir) = base_dirs {
+        let logging_dir = dir.data_dir().join("pkmt");
+
+        let file_appender = tracing_appender::rolling::hourly(logging_dir, "logs.log");
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        tracing_subscriber::fmt().with_writer(non_blocking).init();
+    } else {
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+    }
 
     let res: Result<()> = match cli.command {
         Some(Commands::Todoi {
