@@ -2,7 +2,12 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use todoi::handlers::zk_handler::{get_zk_creator_file, set_zk_creator_file};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing::{Level, debug, info};
+use tracing_subscriber::{
+    EnvFilter,
+    fmt::{self},
+    prelude::*,
+};
 extern crate tracing;
 
 mod file_checklist;
@@ -168,9 +173,16 @@ fn run() -> Result<()> {
     if let Some(dir) = base_dirs {
         let logging_dir = dir.data_dir().join("pkmt");
 
-        let file_appender = tracing_appender::rolling::hourly(logging_dir, "logs.log");
+        let file_appender = tracing_appender::rolling::hourly(logging_dir, "pkmt");
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::fmt().with_writer(non_blocking).init();
+        let nb_subs = tracing_subscriber::fmt::layer().with_writer(non_blocking);
+        let filter = tracing_subscriber::filter::Targets::new()
+            .with_target("pkmt", Level::INFO)
+            .with_target("pkmt", Level::DEBUG);
+        tracing_subscriber::registry()
+            .with(nb_subs)
+            .with(filter)
+            .init();
     } else {
         tracing_subscriber::registry()
             .with(fmt::layer())
