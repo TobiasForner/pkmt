@@ -9,7 +9,7 @@ use test_log::test;
 
 use crate::{
     document_component::{
-        DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropValue, Property,
+        DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropType, PropValue, Property,
         collapse_text,
     },
     parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
@@ -213,7 +213,11 @@ fn parse_logseq_block(text: &str, _file_dir: &Option<PathBuf>) -> Result<ParsedD
         let props = properties
             .iter()
             .map(|(k, v)| {
-                Property::new(k.to_string(), true, vec![PropValue::String(v.to_string())])
+                Property::new(
+                    k.to_string(),
+                    crate::document_component::PropType::Single,
+                    vec![PropValue::String(v.to_string())],
+                )
             })
             .collect();
 

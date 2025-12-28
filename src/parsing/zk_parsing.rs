@@ -7,7 +7,7 @@ use std::{
 use test_log::test;
 
 use crate::{
-    document_component::{ListElem, Property},
+    document_component::{ListElem, PropType, PropValue, Property},
     parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
     util::{apply_substitutions, file_link_pattern, link_name_pattern},
 };
@@ -78,8 +78,38 @@ pub fn parse_zk_file<T: AsRef<Path>>(file_path: T) -> Result<ParsedDocument> {
 
 #[instrument]
 pub fn parse_zk_text(text: &str, file_dir: &Option<PathBuf>) -> Result<ParsedDocument> {
-    let parsed_md = parse_md_text(text).context("Failed to parse md")?;
+    // check for frontmatter
+    let mut frontmatter_text = String::new();
+    let mut rem_text = String::new();
+    let mut frontmatter_done = true;
+    text.lines().enumerate().for_each(|(i, l)| {
+        if i == 0 && l.trim().starts_with("---") {
+            frontmatter_done = false;
+        } else if l.trim().starts_with("---") {
+            frontmatter_text.push('\n');
+            frontmatter_text.push_str(l);
+            frontmatter_done = true;
+        } else if frontmatter_done {
+            // we need a newline between remaining lines and also after the frontmatter if it
+            // exists
+            if !rem_text.is_empty() || !frontmatter_text.is_empty() {
+                rem_text.push('\n');
+            }
+            rem_text.push_str(l);
+        } else {
+            frontmatter_text.push('\n');
+            frontmatter_text.push_str(l);
+        }
+    });
+
+    let parsed_md = parse_md_text(&rem_text).context("Failed to parse md")?;
     let mut components = vec![];
+
+    if !frontmatter_text.is_empty() {
+        let mut lexer = ZkToken::lexer(&frontmatter_text);
+        let frontmatter = parse_frontmatter(&mut lexer, file_dir)?;
+        components.push(frontmatter);
+    }
     parsed_md.into_iter().try_for_each(|comp| match comp {
         MdComponent::Heading(level, text) => {
             components.push(DocumentComponent::Heading(level as u16, text));
@@ -329,7 +359,7 @@ fn parse_property(
     debug!("found property value text: {prop_val_text:?}");
     let prop_val_text = prop_val_text.trim();
     if prop_val_text.is_empty() {
-        return Ok(Property::new(name, true, vec![]));
+        return Ok(Property::new(name, PropType::Single, vec![]));
     } else if prop_val_text.starts_with('[') && prop_val_text.ends_with(']') {
         // TODO: check that brackets form a pair
         // multi property
@@ -363,7 +393,7 @@ fn parse_property(
 
         return Ok(Property::new_parse(
             name,
-            false,
+            PropType::CompactList,
             &values,
             crate::parsing::TextMode::Zk,
             file_dir,
@@ -371,7 +401,7 @@ fn parse_property(
     } else {
         return Ok(Property::new_parse(
             name,
-            true,
+            PropType::Single,
             &[prop_val_text.to_string()],
             crate::parsing::TextMode::Zk,
             file_dir,
@@ -416,26 +446,45 @@ fn parse_frontmatter(
         match token {
             FrontmatterDelim => {
                 let mut props = vec![];
-                text.lines().try_for_each(|l| {
-                    let tmp: anyhow::Result<()> = if l.is_empty() {
-                        Ok(())
-                    } else {
-                        let parts = l
-                            .split_once(":")
-                            .context("frontmatter lines need to contain a colon, got {l:?}")?;
-                        let name = parts.0.trim();
-                        let (vals, is_multi) = parse_prop_values(parts.1);
+                let text_lines: Vec<&str> = text.lines().collect();
+                let mut pos = 0;
+                while pos < text_lines.len() {
+                    let line = text_lines[pos];
+                    if let Some((key, value)) = line.split_once(":") {
+                        if value.trim().is_empty() {
+                            // check for md list
+                            let mut list_values = vec![];
+                            while pos + 1 < text_lines.len()
+                                && text_lines[pos + 1].trim().starts_with("- ")
+                            {
+                                let next_value = text_lines[pos + 1].trim()[2..].trim();
+                                list_values.push(next_value.to_string());
+                                pos += 1;
+                            }
+                            props.push(Property::new(
+                                key.to_string(),
+                                PropType::List,
+                                list_values.into_iter().map(PropValue::String).collect(),
+                            ));
+                            continue;
+                        }
+                        let name = key.trim();
+                        let (vals, is_multi) = parse_prop_values(value);
+                        let prop_type = if is_multi {
+                            PropType::CompactList
+                        } else {
+                            PropType::Single
+                        };
                         props.push(Property::new_parse(
                             name.to_string(),
-                            !is_multi,
+                            prop_type,
                             &vals,
                             crate::parsing::TextMode::Zk,
                             file_dir,
                         ));
-                        Ok(())
-                    };
-                    tmp
-                })?;
+                    }
+                    pos += 1;
+                }
                 return Ok(DocumentComponent::Frontmatter(props));
             }
             _ => {
@@ -768,7 +817,7 @@ fn test_multi_property() {
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
-        false,
+        PropType::CompactList,
         vec![PropValue::String("test".to_string())],
     )]);
     debug!("final parse: {res:?}");
@@ -786,8 +835,11 @@ fn test_multi_property() {
 fn test_multi_property_empty() {
     let text = "property::= []";
     let res = parse_zk_text(text, &None);
-    let prop =
-        DocumentComponent::Properties(vec![Property::new("property".to_string(), false, vec![])]);
+    let prop = DocumentComponent::Properties(vec![Property::new(
+        "property".to_string(),
+        PropType::CompactList,
+        vec![],
+    )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
@@ -807,7 +859,7 @@ fn test_multi_property_single_char() {
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "p".to_string(),
-        false,
+        PropType::CompactList,
         vec![PropValue::String("a".to_string())],
     )]);
     debug!("final parse: {res:?}");
@@ -828,7 +880,7 @@ fn test_single_property_file_name() {
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
-        true,
+        PropType::Single,
         vec![PropValue::FileLink(
             MentionedFile::FileName("../test.md".to_string()),
             None,
@@ -854,7 +906,7 @@ fn test_multi_property_file_name() {
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
-        false,
+        PropType::CompactList,
         vec![PropValue::FileLink(
             MentionedFile::FileName("../test.md".to_string()),
             None,
@@ -880,7 +932,7 @@ fn test_property_text() {
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
-        true,
+        PropType::Single,
         vec![PropValue::String("value".to_string())],
     )]);
     debug!("final parse: {res:?}");
@@ -937,4 +989,21 @@ fn test_link_with_special() {
     assert_eq!(res, expected);
     let res = res.to_zk_text(&None);
     assert_eq!(text, res);
+}
+
+#[test]
+fn test_frontmatter_with_md_list() {
+    let text = "---\ntags:\n  - a\n  - b\n---";
+    let res = parse_zk_text(text, &None).unwrap();
+    let expected =
+        ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![Property::new(
+            "tags".to_string(),
+            PropType::List,
+            vec![
+                PropValue::String("a".to_string()),
+                PropValue::String("b".into()),
+            ],
+        )])]);
+    assert_eq!(res, expected);
+    assert_eq!(res.to_zk_text(&None), text);
 }

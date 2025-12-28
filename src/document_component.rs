@@ -416,9 +416,16 @@ impl Display for MentionedFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PropType {
+    CompactList,
+    List,
+    Single,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Property {
     name: String,
-    is_single: bool,
+    prop_type: PropType,
     pub values: Vec<PropValue>,
 }
 
@@ -442,10 +449,14 @@ impl Property {
             }
             Zk => {
                 let value = vals.join(", ");
-                if self.is_single {
-                    format!("{} ::= {value}", self.name)
-                } else {
-                    format!("{} ::= [{value}]", self.name)
+                match self.prop_type {
+                    PropType::CompactList => format!("{} ::= [{value}]", self.name),
+                    PropType::Single => format!("{} ::= {value}", self.name),
+                    PropType::List => {
+                        let value: Vec<String> = vals.iter().map(|v| format!("  - {v}")).collect();
+                        let value = value.join(", ");
+                        format!("{}:\n{value}", self.name)
+                    }
                 }
             }
             Obsidian => {
@@ -461,25 +472,30 @@ impl Property {
             .map(|v| v.to_mode_text(&TextMode::Zk, file_info))
             .collect();
         let value = vals.join(", ");
-        if self.is_single {
-            format!("{}: {value}", self.name)
-        } else {
-            format!("{}: [{value}]", self.name)
+        match self.prop_type {
+            PropType::CompactList => format!("{}: [{value}]", self.name),
+            PropType::Single => format!("{}: {value}", self.name),
+            PropType::List => {
+                let value: Vec<String> = vals.iter().map(|v| format!("  - {v}")).collect();
+                let value = value.join("\n");
+                format!("{}:\n{value}", self.name)
+            }
         }
     }
 
-    pub fn new(name: String, is_single: bool, values: Vec<PropValue>) -> Self {
+    pub fn new(name: String, prop_type: PropType, values: Vec<PropValue>) -> Self {
         Self {
             name,
-            is_single,
+            prop_type,
             values,
         }
     }
 
-    // created a new instance by parsing the passed values if possible
+    /// create a new instance by parsing the passed values if possible
+    /// This is necessary to check for file paths/references
     pub fn new_parse(
         name: String,
-        is_single: bool,
+        prop_type: PropType,
         values: &[String],
         mode: TextMode,
         file_dir: &Option<PathBuf>,
@@ -488,7 +504,7 @@ impl Property {
             .iter()
             .map(|v| Property::try_prop_value_parse(v, &mode, file_dir))
             .collect();
-        Self::new(name, is_single, values)
+        Self::new(name, prop_type, values)
     }
 
     fn try_prop_value_parse(val: &str, mode: &TextMode, file_dir: &Option<PathBuf>) -> PropValue {
@@ -1306,12 +1322,12 @@ fn test_list_element_to_logseq() {
             contents: ParsedDocument::ParsedText(vec![DocumentComponent::Properties(vec![
                 Property::new(
                     "template".to_string(),
-                    true,
+                    PropType::Single,
                     vec![PropValue::String("blog".to_string())],
                 ),
                 Property::new(
                     "tags".to_string(),
-                    true,
+                    PropType::Single,
                     vec![PropValue::String("[[blog]]".to_string())],
                 ),
             ])]),
