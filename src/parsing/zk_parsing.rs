@@ -993,17 +993,23 @@ fn test_link_with_special() {
 
 #[test]
 fn test_frontmatter_with_md_list() {
-    let text = "---\ntags:\n  - a\n  - b\n---";
+    let text = "---\nprop: val\ntags:\n    - a\n    - b\n---";
     let res = parse_zk_text(text, &None).unwrap();
-    let expected =
-        ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![Property::new(
+    let expected = ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![
+        Property::new(
+            "prop".to_string(),
+            PropType::Single,
+            vec![PropValue::String("val".to_string())],
+        ),
+        Property::new(
             "tags".to_string(),
             PropType::List,
             vec![
                 PropValue::String("a".to_string()),
                 PropValue::String("b".into()),
             ],
-        )])]);
+        ),
+    ])]);
     assert_eq!(res, expected);
     assert_eq!(res.to_zk_text(&None), text);
 }

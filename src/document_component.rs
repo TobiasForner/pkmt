@@ -453,7 +453,8 @@ impl Property {
                     PropType::CompactList => format!("{} ::= [{value}]", self.name),
                     PropType::Single => format!("{} ::= {value}", self.name),
                     PropType::List => {
-                        let value: Vec<String> = vals.iter().map(|v| format!("  - {v}")).collect();
+                        let value: Vec<String> =
+                            vals.iter().map(|v| format!("    - {v}")).collect();
                         let value = value.join(", ");
                         format!("{}:\n{value}", self.name)
                     }
@@ -476,7 +477,7 @@ impl Property {
             PropType::CompactList => format!("{}: [{value}]", self.name),
             PropType::Single => format!("{}: {value}", self.name),
             PropType::List => {
-                let value: Vec<String> = vals.iter().map(|v| format!("  - {v}")).collect();
+                let value: Vec<String> = vals.iter().map(|v| format!("    - {v}")).collect();
                 let value = value.join("\n");
                 format!("{}:\n{value}", self.name)
             }
