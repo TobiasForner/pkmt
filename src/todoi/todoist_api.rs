@@ -73,7 +73,7 @@ impl TodoistAPI {
 
     pub fn get_inbox(&self) -> Result<TodoistProject> {
         let tmp = self
-            .get_all_projects()
+            .get_all_projects()?
             .into_iter()
             .find(|p| p.is_inbox_project);
         tmp.context("Inbox does not exist!")
@@ -121,16 +121,19 @@ impl TodoistAPI {
         res.status().as_u16() == 204
     }
 
-    fn get_all_projects(&self) -> Vec<TodoistProject> {
+    fn get_all_projects(&self) -> Result<Vec<TodoistProject>> {
         let url = "https://api.todoist.com/rest/v2/projects";
-        let req = self.req_base(url).try_clone().unwrap();
+        let req = self
+            .req_base(url)
+            .try_clone()
+            .context("Failed to clone todoist projects url")?;
 
-        let res = self.runtime.block_on(req.send()).unwrap();
+        let res = self.runtime.block_on(req.send())?;
         if res.status() != 200 {
             println!("ERROR: failed to retrieve projects from Todoist!");
         }
-        let text = self.runtime.block_on(res.text()).unwrap();
-        serde_json::from_str(&text).unwrap()
+        let text = self.runtime.block_on(res.text())?;
+        serde_json::from_str(&text).context("")
     }
 
     fn req_base(&self, url: &str) -> reqwest::RequestBuilder {
