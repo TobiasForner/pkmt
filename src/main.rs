@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use todoi::handlers::zk_handler::{get_zk_creator_file, set_zk_creator_file};
-use tracing::{Level, debug, info};
+use tracing::Level;
 use tracing_subscriber::{
     EnvFilter,
     fmt::{self},

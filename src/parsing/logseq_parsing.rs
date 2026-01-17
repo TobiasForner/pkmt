@@ -9,7 +9,7 @@ use test_log::test;
 
 use crate::{
     document_component::{
-        DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropType, PropValue, Property,
+        DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropValue, Property,
         collapse_text,
     },
     parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
