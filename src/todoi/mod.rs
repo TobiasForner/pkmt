@@ -8,6 +8,7 @@ use std::{fmt::Debug, path::PathBuf, vec};
 
 use anyhow::{Context, Result, bail};
 use interactive::get_interactive_data;
+use rayon::prelude::*;
 use regex::Regex;
 use tracing::{debug, info, instrument};
 
@@ -83,26 +84,36 @@ fn get_task_data_non_interactive(
     tasks: &[TodoistTask],
     config: &Config,
 ) -> Vec<(TaskData, TodoistTask)> {
-    let tasks = tasks.iter().map(|t| (handle_youtube_task(t, config), t));
-    let tasks = tasks.map(|(td, task)| match td {
-        TaskData::Unhandled => (handle_sbs_task(task), task),
-        _ => (td, task),
-    });
-    let tasks = tasks.map(|(td, task)| match td {
-        TaskData::Unhandled => (handle_youtube_playlist(task, config), task),
-        _ => (td, task),
-    });
-    let tasks = tasks.map(|(td, task)| match td {
-        TaskData::Unhandled => {
-            if let Ok(td) = handle_reddit_post(task, config) {
-                (td, task)
-            } else {
-                (TaskData::Unhandled, task)
-            }
+    fn process_task(task: TodoistTask, config: &Config) -> (TaskData, TodoistTask) {
+        let td = handle_youtube_task(&task, config);
+        if !matches!(td, TaskData::Unhandled) {
+            return (td, task);
         }
-        _ => (td, task),
-    });
-    tasks.map(|(td, task)| (td, task.clone())).collect()
+        let td = handle_sbs_task(&task);
+        if !matches!(td, TaskData::Unhandled) {
+            return (td, task);
+        }
+        let td = handle_youtube_playlist(&task, config);
+        if !matches!(td, TaskData::Unhandled) {
+            return (td, task);
+        }
+        match td {
+            TaskData::Unhandled => {
+                if let Ok(td) = handle_reddit_post(&task, config) {
+                    (td, task)
+                } else {
+                    (TaskData::Unhandled, task)
+                }
+            }
+
+            _ => (td, task),
+        }
+    }
+
+    tasks
+        .par_iter()
+        .map(|t| process_task(t.clone(), config))
+        .collect()
 }
 
 fn get_task_data_full(

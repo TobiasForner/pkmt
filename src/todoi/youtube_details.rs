@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use std::str::FromStr;
+use tracing::debug;
 
 /// returns (title, channel)
 pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
@@ -13,7 +14,7 @@ pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String
     } else {
         video_url.to_string()
     };
-    println!("Resolved {video_url} to {video_url}");
+    debug!("Resolved {video_url} to {video_url}");
     let id = if let Some(pos) = video_url.find("/shorts/") {
         Some(video_url[pos + 8..video_url.len()].to_string())
     } else {
@@ -22,7 +23,7 @@ pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String
             .find(|(k, _)| k == "v")
             .map(|(_, id)| id.to_string())
     };
-    println!("{video_url}-> {id:?}");
+    debug!("{video_url}-> {id:?}");
     if let Some(id) = id {
         let res = client
             .get("https://www.googleapis.com/youtube/v3/videos")
