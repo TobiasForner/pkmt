@@ -37,8 +37,10 @@ impl ZkHandler {
         let output = Command::new("zk")
             .arg("new")
             .arg("--no-input")
-            .arg(format!("--title=\"{title}\""))
-            .arg(format!("--template={}", template_path.to_str().unwrap()))
+            .arg("--title")
+            .arg(&title)
+            .arg("--template")
+            .arg(template_path.to_str().unwrap())
             .arg("-p")
             .output()
             .context(format!("failed to retrieve zk file for {title}"))?;
