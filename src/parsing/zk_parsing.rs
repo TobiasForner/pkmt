@@ -370,7 +370,7 @@ fn parse_property(
         let mut current = String::new();
         prop_vals_text.chars().for_each(|c| {
             if c == ',' {
-                values.push(current.clone());
+                values.push(current.trim().to_string());
                 current = String::new();
             } else {
                 current.push(c);
@@ -388,7 +388,7 @@ fn parse_property(
             }
         });
         if !current.is_empty() {
-            values.push(current);
+            values.push(current.trim().to_string());
         }
 
         return Ok(Property::new_parse(
@@ -813,19 +813,22 @@ fn test_unicode() {
 #[test]
 fn test_multi_property() {
     use crate::document_component::PropValue;
-    let text = "property::= [test]";
+    let text = "property::= [test, ab]";
     let res = parse_zk_text(text, &None);
     let prop = DocumentComponent::Properties(vec![Property::new(
         "property".to_string(),
         PropType::CompactList,
-        vec![PropValue::String("test".to_string())],
+        vec![
+            PropValue::String("test".to_string()),
+            PropValue::String("ab".to_string()),
+        ],
     )]);
     debug!("final parse: {res:?}");
     if let Ok(pd) = res {
         let expected = ParsedDocument::ParsedText(vec![prop]);
         assert_eq!(pd, expected);
         let res = pd.to_zk_text(&None);
-        assert_eq!("property ::= [test]", res);
+        assert_eq!("property ::= [test, ab]", res);
     } else {
         panic!("Error: {res:?}");
     }
