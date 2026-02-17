@@ -1,0 +1,32 @@
+[[repos]]
+repo = "local"
+hooks = [
+    {
+	id = "cargo-check",
+	name = "cargo check",
+	language = "system",
+	entry = "cargo check",
+	pass_filenames = false
+    },
+    {
+	id = "cargo-fmt",
+	name = "cargo fmt",
+	language = "system",
+	entry = "cargo fmt --all -- --check --color always",
+	pass_filenames = false
+    },
+    {
+	id = "cargo-clippy",
+	name = "cargo clippy",
+	language = "system",
+	entry = "cargo clippy",
+	pass_filenames = false
+    },
+    {
+	id = "cargo-test",
+	name = "cargo test",
+	language = "system",
+	entry = "cargo test",
+	pass_filenames = false
+    }
+]

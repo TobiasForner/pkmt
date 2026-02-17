@@ -26,5 +26,9 @@ yt_api_key = "..."
 todoist_api_key = "..."
 ```
 
+## Development
+This project uses [prek](https://github.com/j178/prek) for git hooks.
+Please install its hooks via `prek install`.
+
 ## Goals
 - convert between different formats
