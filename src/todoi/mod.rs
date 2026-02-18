@@ -3,6 +3,7 @@ pub mod handlers;
 mod interactive;
 mod todoist_api;
 mod youtube_details;
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use scraper::{Html, Selector};
 use std::{fmt::Debug, path::PathBuf, vec};
 
@@ -109,9 +110,13 @@ fn get_task_data_non_interactive(
             _ => (td, task),
         }
     }
+    let style = ProgressStyle::with_template("[{elapsed}] {msg} {bar}").unwrap();
+    let bar = ProgressBar::new(tasks.len() as u64).with_style(style);
+    bar.set_message("Handling tasks...");
 
     tasks
         .par_iter()
+        .progress_with(bar)
         .map(|t| process_task(t.clone(), config))
         .collect()
 }
