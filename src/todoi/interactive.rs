@@ -1,9 +1,9 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 
 use crate::util::{self, file_link_pattern, link_name_pattern};
 
-use super::{config::Config, todoist_api::TodoistTask, TaskData};
+use super::{TaskData, config::Config, todoist_api::TodoistTask};
 #[derive(Debug)]
 pub enum Resolution {
     ToHandle,
