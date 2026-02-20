@@ -13,16 +13,15 @@ extern crate tracing;
 mod file_checklist;
 use document_component::{FileInfo, convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
-use inspect::{list_empty_files, similar_file_names};
 use util::files_in_tree;
 
 use std::{collections::HashSet, path::PathBuf};
 
-use crate::todoi::config::Tags;
+use crate::{doctor::doctor, todoi::config::Tags};
 mod document_component;
-mod inspect;
 
 use parsing::TextMode;
+mod doctor;
 mod parsing;
 mod todoi;
 mod util;
@@ -75,12 +74,6 @@ enum Commands {
         #[arg(required = true)]
         todo_marker: String,
     },
-    /// inspect the files in the subtree rooted at root_dir and report issues
-    Inspect {
-        /// root directory to inspect
-        #[arg(required = true)]
-        root_dir: PathBuf,
-    },
     /// todoist import
     Todoi {
         #[arg(required = false)]
@@ -105,6 +98,12 @@ enum Commands {
         mode: Option<TextMode>,
         #[clap(subcommand)]
         creator_command: CreatorCommand,
+    },
+    Doctor {
+        #[arg(required = false)]
+        root_dir: Option<PathBuf>,
+        #[arg(short, long, default_value_t = false, required = false)]
+        fix: bool,
     },
 }
 
@@ -245,10 +244,22 @@ fn run() -> Result<()> {
                 .context(format!("Could not write checklist to {out_file:?}!"))?;
             Ok(())
         }
-        Some(Commands::Inspect { root_dir }) => {
-            list_empty_files(root_dir.clone())?;
-            similar_file_names(root_dir, 4);
-            Ok(())
+        Some(Commands::Doctor { root_dir, fix }) => {
+            let mode = TextMode::Zk;
+            let root_dir = if let Some(root_dir) = root_dir {
+                root_dir
+            } else if mode == TextMode::Zk {
+                if let Ok(notebook_dir) = std::env::var("ZK_NOTEBOOK_DIR") {
+                    PathBuf::from(notebook_dir)
+                } else {
+                    bail!(
+                        "Could not determine zk notebook dir. Either specify it via the environment variable 'ZK_NOTEBOOK_DIR' or specify it directly!"
+                    );
+                }
+            } else {
+                bail!("Could not determine graph root!");
+            };
+            doctor(&root_dir, fix)
         }
         Some(Commands::Convert {
             in_path,

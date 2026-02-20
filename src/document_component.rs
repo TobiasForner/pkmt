@@ -214,6 +214,13 @@ impl ParsedDocument {
 
         None
     }
+
+    pub fn get_file_path(&self) -> Option<PathBuf> {
+        match self {
+            ParsedDocument::ParsedFile(_, p) => Some(p.clone()),
+            _ => None,
+        }
+    }
     pub fn _get_nth_child_mut(&mut self, n: usize) -> Option<&mut DocumentComponent> {
         match self {
             ParsedDocument::ParsedFile(comps, _) => comps.get_mut(n),
