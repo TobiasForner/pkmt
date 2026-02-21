@@ -110,7 +110,7 @@ pub fn link_name_pattern() -> String {
 }
 
 pub fn file_link_pattern() -> String {
-    r"([\sa-zA-Z0-9'?!\.:\-/_=%&@#]+)".to_string()
+    r"([\sa-zA-Z0-9'?!\.:\-/_=%&@#~]+)".to_string()
 }
 
 pub fn _indent_level(line: &str) -> usize {
