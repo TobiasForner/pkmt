@@ -17,7 +17,10 @@ use util::files_in_tree;
 
 use std::{collections::HashSet, path::PathBuf};
 
-use crate::{doctor::doctor, todoi::config::Tags};
+use crate::{
+    doctor::doctor,
+    todoi::{config::Tags, handlers::zk_handler::ZkHandler},
+};
 mod document_component;
 
 use parsing::TextMode;
@@ -343,7 +346,8 @@ fn run() -> Result<()> {
                             set_zk_creator_file(&name, &new_file)?;
                         }
                         CreatorCommand::ShowFile { relative } => {
-                            let mut file = get_zk_creator_file(&root_dir, &name)?;
+                            let handler = ZkHandler::new(root_dir);
+                            let mut file = get_zk_creator_file(&handler, &name)?;
                             if let Some(relative) = relative
                                 && let Some(rel) = relative.parent()
                                 && let Some(rel) = pathdiff::diff_paths(&file, rel)

@@ -1,11 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    fs::DirEntry,
-    path::{Path, PathBuf},
-    str::FromStr,
-    vec,
-};
+use std::{collections::HashMap, fmt::Debug, fs::DirEntry, path::PathBuf, str::FromStr, vec};
 
 use anyhow::{Context, Result, bail};
 use tracing::{debug, info, instrument};
@@ -29,7 +22,7 @@ impl ZkHandler {
     }
 
     #[instrument]
-    fn get_zk_file(title: &str, template_path: PathBuf) -> Result<PathBuf> {
+    fn get_zk_file(&self, title: &str, template_path: PathBuf) -> Result<PathBuf> {
         use std::process::Command;
         debug!("trying to get zk file for {title}");
 
@@ -40,7 +33,15 @@ impl ZkHandler {
             .arg("--title")
             .arg(&title)
             .arg("--template")
-            .arg(template_path.to_str().unwrap())
+            .arg(template_path.to_str().context(format!(
+                "Failed to convert zk template path to string: {:?}",
+                self.root_dir
+            ))?)
+            .arg("--notebook-dir")
+            .arg(self.root_dir.to_str().context(format!(
+                "Failed to convert zk root directory to string: {:?}",
+                self.root_dir
+            ))?)
             .arg("-p")
             .output()
             .context(format!("failed to retrieve zk file for {title}"))?;
@@ -68,7 +69,7 @@ impl ZkHandler {
         prop_name: &str,
         file_dir: &Option<PathBuf>,
     ) -> Result<bool> {
-        let file = get_zk_creator_file(&self.root_dir, author)?;
+        let file = get_zk_creator_file(self, author)?;
         debug!("Found creator file {file:?} for {author:?}");
         self.fill_props(
             pd,
@@ -265,7 +266,7 @@ impl TaskDataHandler for ZkHandler {
             _ => todo!("not implemented: conversion of {task_data:?} to zk."),
         };
         debug!("using template {template_file:?}");
-        let Ok(zk_file) = ZkHandler::get_zk_file(&title, template_file) else {
+        let Ok(zk_file) = self.get_zk_file(&title, template_file) else {
             return Ok(false);
         };
         if !zk_file.exists() {
@@ -327,7 +328,7 @@ impl TaskDataHandler for ZkHandler {
     }
 }
 
-pub fn get_zk_creator_file(root_dir: &Path, name: &str) -> Result<PathBuf> {
+pub fn get_zk_creator_file(handler: &ZkHandler, name: &str) -> Result<PathBuf> {
     if let Some(base_dirs) = directories::BaseDirs::new() {
         let data_dir = base_dirs.data_dir().join("pkmt");
         if !data_dir.exists() {
@@ -348,8 +349,12 @@ pub fn get_zk_creator_file(root_dir: &Path, name: &str) -> Result<PathBuf> {
             debug!("{name:?}: found creator file in lookup: {path:?}");
             Ok(path.to_path_buf())
         } else {
-            let template_file = root_dir.join(".zk").join("templates").join("creator.md");
-            let file = ZkHandler::get_zk_file(name, template_file)?;
+            let template_file = handler
+                .root_dir
+                .join(".zk")
+                .join("templates")
+                .join("creator.md");
+            let file = handler.get_zk_file(name, template_file)?;
             debug!("{name:?}: created new creator file: {file:?}");
             lookup.insert(name.to_string(), file.clone());
             let text = toml::to_string(&lookup)?;
