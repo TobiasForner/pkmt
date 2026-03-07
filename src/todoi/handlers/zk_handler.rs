@@ -27,26 +27,42 @@ impl ZkHandler {
         debug!("trying to get zk file for {title}");
 
         let title = title.replace('"', "");
-        let output = Command::new("zk")
-            .arg("new")
-            .arg("--no-input")
-            .arg("--title")
-            .arg(&title)
-            .arg("--template")
-            .arg(template_path.to_str().context(format!(
+
+        let root_dir = self.root_dir.to_str().context(format!(
+            "Failed to convert zk root directory to string: {:?}",
+            self.root_dir
+        ))?;
+        let zk_args = [
+            "new",
+            "--no-input",
+            "--title",
+            &title,
+            "--template",
+            template_path.to_str().context(format!(
                 "Failed to convert zk template path to string: {:?}",
                 self.root_dir
-            ))?)
-            .arg("--notebook-dir")
-            .arg(self.root_dir.to_str().context(format!(
+            ))?,
+            "--notebook-dir",
+            self.root_dir.to_str().context(format!(
                 "Failed to convert zk root directory to string: {:?}",
                 self.root_dir
-            ))?)
-            .arg("-p")
+            ))?,
+            "--notebook-dir",
+            root_dir,
+            "--working-dir",
+            root_dir,
+            "-p",
+        ];
+        let output = Command::new("zk")
+            .args(zk_args)
             .output()
             .context(format!("failed to retrieve zk file for {title}"))?;
         if !output.status.success() {
-            println!("Failed to create zk file for title {title:?}!");
+            println!(
+                "Failed to create zk file for title {title:?}! command: {zk_args:?}; {}; {}",
+                str::from_utf8(&output.stdout).unwrap(),
+                str::from_utf8(&output.stderr).unwrap()
+            );
             bail!("Could not create zk file for {title:?}");
         }
         let p = std::str::from_utf8(&output.stdout)?;
