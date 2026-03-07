@@ -135,7 +135,7 @@ enum TCfgCommand {
         #[clap(required = true)]
         tags: Vec<String>,
     },
-    /// add sources to a url
+    /// add string inclusion-based sources to a url
     AddUrlSources {
         #[arg(required = true)]
         url: String,
