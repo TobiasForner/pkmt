@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use anyhow::Result;
+use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
 use tracing::debug;
 use tracing::instrument;
 
@@ -48,8 +49,13 @@ pub fn handle_tasks_main(
         .collect();
     let tasks = get_task_data_full(&deduped_tasks, config, &handler.get_template_names()?);
 
+    let style = ProgressStyle::with_template("[{elapsed}] {msg} {bar}").unwrap();
+    let bar = ProgressBar::new(tasks.len() as u64).with_style(style);
+    bar.set_message("Importing tasks...");
+
     let tasks: Result<Vec<(bool, TodoistTask)>> = tasks
         .into_iter()
+        .progress_with(bar)
         .map(|(td, task)| handler.handle_task_data(&td).map(|e| (e, task)))
         .collect();
     debug!("filtering handled tasks: {tasks:?}");

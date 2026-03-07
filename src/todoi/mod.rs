@@ -112,7 +112,7 @@ fn get_task_data_non_interactive(
     }
     let style = ProgressStyle::with_template("[{elapsed}] {msg} {bar}").unwrap();
     let bar = ProgressBar::new(tasks.len() as u64).with_style(style);
-    bar.set_message("Handling tasks...");
+    bar.set_message("Analyzing tasks...");
 
     tasks
         .par_iter()
