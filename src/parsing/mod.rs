@@ -11,10 +11,11 @@ use logseq_parsing::{parse_logseq_file, parse_logseq_text};
 use obsidian_parsing::{parse_obsidian_file, parse_obsidian_text};
 use zk_parsing::{parse_zk_file, parse_zk_text};
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Default)]
 pub enum TextMode {
     Obsidian,
     LogSeq,
+    #[default]
     Zk,
 }
 
@@ -33,6 +34,7 @@ impl ValueEnum for TextMode {
         })
     }
 }
+
 pub fn parse_text(
     text: &str,
     mode: &TextMode,

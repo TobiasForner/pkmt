@@ -107,6 +107,8 @@ enum Commands {
         root_dir: Option<PathBuf>,
         #[arg(short, long, default_value_t = false, required = false)]
         fix: bool,
+        #[arg(short, long, required = false)]
+        mode: Option<TextMode>,
     },
 }
 
@@ -198,7 +200,7 @@ fn run() -> Result<()> {
             complete_tasks,
             mode,
         }) => {
-            let mode = mode.unwrap_or(TextMode::LogSeq);
+            let mode = mode.unwrap_or_default();
             let graph_root = if let Some(graph_root) = graph_root {
                 graph_root
             } else if mode == TextMode::Zk {
@@ -247,8 +249,12 @@ fn run() -> Result<()> {
                 .context(format!("Could not write checklist to {out_file:?}!"))?;
             Ok(())
         }
-        Some(Commands::Doctor { root_dir, fix }) => {
-            let mode = TextMode::Zk;
+        Some(Commands::Doctor {
+            root_dir,
+            fix,
+            mode,
+        }) => {
+            let mode = mode.unwrap_or_default();
             let root_dir = if let Some(root_dir) = root_dir {
                 root_dir
             } else if mode == TextMode::Zk {
