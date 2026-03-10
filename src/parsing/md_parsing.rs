@@ -113,28 +113,26 @@ pub fn parse_md_text(text: &str) -> Result<Vec<MdComponent>> {
                         res.push(MdComponent::new_text(lexer.slice()));
                         blank_line = true;
                     }
+                    ListStart if blank_line => {
+                        let le = parse_list(&mut lexer, indent_spaces)?;
+                        res.push(le);
+                        // list is always terminated by a blank line
+                        last_terminated_line = true;
+                    }
                     ListStart => {
-                        if blank_line {
-                            let le = parse_list(&mut lexer, indent_spaces)?;
-                            res.push(le);
-                            // list is always terminated by a blank line
-                            last_terminated_line = true;
-                        } else {
-                            res.push(MdComponent::new_text(lexer.slice()));
-                        }
+                        res.push(MdComponent::new_text(lexer.slice()));
                     }
 
-                    Hashtag => {
-                        if blank_line {
-                            let (heading, found) = parse_heading(&mut lexer)?;
-                            res.push(heading);
-                            if found {
-                                blank_line = true;
-                                last_terminated_line = true;
-                            }
-                        } else {
-                            res.push(MdComponent::new_text(lexer.slice()));
+                    Hashtag if blank_line => {
+                        let (heading, found) = parse_heading(&mut lexer)?;
+                        res.push(heading);
+                        if found {
+                            blank_line = true;
+                            last_terminated_line = true;
                         }
+                    }
+                    Hashtag => {
+                        res.push(MdComponent::new_text(lexer.slice()));
                     }
                     _ => {
                         res.push(MdComponent::new_text(lexer.slice()));
