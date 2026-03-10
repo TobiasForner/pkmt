@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, fs::DirEntry, path::PathBuf, str::Fr
 use anyhow::{Context, Result, bail};
 use tracing::{debug, info, instrument};
 
-use crate::todoi::{TaskData, handlers::TaskDataHandler, url_is_duplicate};
+use crate::todoi::{TaskData, handlers::TaskDataHandler};
 use crate::{
     document_component::{
         DocumentComponent, FileInfo, ListElem, MentionedFile, ParsedDocument, PropValue,
@@ -259,12 +259,6 @@ impl TaskDataHandler for ZkHandler {
     #[instrument]
     fn handle_task_data(&mut self, task_data: &TaskData) -> Result<bool> {
         debug!("handling {task_data:?}");
-        if let Some(url) = task_data.get_url()
-            && url_is_duplicate(url, &self.root_dir, &TextMode::Zk)?
-        {
-            info!("Duplicate url: {url}! Skipping {task_data:?}");
-            return Ok(false);
-        }
         let Some(title) = task_data.get_title() else {
             debug!("no title!");
             return Ok(false);

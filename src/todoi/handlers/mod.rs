@@ -24,7 +24,7 @@ pub trait TaskDataHandler {
 }
 
 #[instrument(skip_all)]
-pub fn handle_tasks_main(
+pub fn handle_tasks(
     tasks: &[TodoistTask],
     config: &Config,
     mode: TextMode,

@@ -119,7 +119,7 @@ impl ParsedDocument {
         }
     }
 
-    pub fn get_document_component(
+    pub fn _get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
@@ -127,7 +127,7 @@ impl ParsedDocument {
             if selector(comp) {
                 return Some(comp.clone());
             }
-            let rec = comp.get_document_component(selector);
+            let rec = comp._get_document_component(selector);
             if rec.is_some() {
                 return rec;
             }
@@ -681,14 +681,14 @@ impl ListElem {
         res
     }
 
-    pub fn get_document_component(
+    pub fn _get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
-        self.contents.get_document_component(selector).or_else(|| {
+        self.contents._get_document_component(selector).or_else(|| {
             self.children
                 .iter()
-                .map(|le| le.get_document_component(selector))
+                .map(|le| le._get_document_component(selector))
                 .find(|c| c.is_some())
                 .flatten()
         })
@@ -882,7 +882,7 @@ impl DocumentComponent {
                 }),
         }
     }
-    fn get_document_component(
+    fn _get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
@@ -892,7 +892,7 @@ impl DocumentComponent {
         } else if let List(list_elements, _) = self {
             list_elements
                 .iter()
-                .find_map(|le| le.get_document_component(selector))
+                .find_map(|le| le._get_document_component(selector))
         } else {
             None
         }

@@ -15,10 +15,10 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     document_component::{DocumentComponent, ListElem, ParsedDocument, PropValue},
-    parsing::{TextMode, parse_all_files_in_dir},
+    parsing::TextMode,
     todoi::{
         config::Config,
-        handlers::handle_tasks_main,
+        handlers::handle_tasks,
         interactive::Resolution,
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
@@ -43,7 +43,7 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<(
     info!("Retrieved todoist tasks.");
     inbox_tasks.dedup_by_key(|t| t.content.clone());
     debug!("mode: {mode:?}");
-    let completed_tasks = handle_tasks_main(&inbox_tasks, &config, mode, &root_dir)?;
+    let completed_tasks = handle_tasks(&inbox_tasks, &config, mode, &root_dir)?;
 
     if complete_tasks {
         completed_tasks.iter().for_each(|t| {
@@ -197,18 +197,6 @@ impl TaskData {
             Reddit(_, _, tags) => tags.clone(),
         }
     }
-
-    fn get_url(&self) -> Option<&str> {
-        use TaskData::*;
-        match self {
-            Unhandled => None,
-            Youtube(url, _, _, _) => Some(url),
-            Sbs(url, _, _, _, _) => Some(url),
-            YtPlaylist(url, _, _) => Some(url),
-            Interactive(_, url, _, _, _) => url.as_deref(),
-            Reddit(url, _, _) => Some(url),
-        }
-    }
 }
 
 fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
@@ -338,26 +326,4 @@ pub fn handle_reddit_post(task: &TodoistTask, config: &Config) -> Result<TaskDat
         }
     }
     bail!("Failed to extract reddit data")
-}
-
-fn url_is_duplicate(url: &str, root_dir: &PathBuf, mode: &TextMode) -> Result<bool> {
-    let parsed_documents = parse_all_files_in_dir(root_dir, mode)?;
-    let mut res = false;
-    parsed_documents.iter().for_each(|pd| {
-        if pd
-            .get_document_component(&|dc: &DocumentComponent| {
-                if let DocumentComponent::Properties(props) = dc {
-                    props.iter().any(|p| {
-                        p.has_name("url") && p.has_value(&PropValue::String(url.to_string()))
-                    })
-                } else {
-                    false
-                }
-            })
-            .is_some()
-        {
-            res = true;
-        }
-    });
-    Ok(res)
 }
