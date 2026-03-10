@@ -36,10 +36,8 @@ pub fn get_list_elem_with_doc_elem(
 /// tasks are marked as completed if complete_tasks is set
 pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<()> {
     let config = Config::load()?;
-    let todoist_api = TodoistAPI::new(&config.keys.todoist_api_key);
-    let inbox = todoist_api.get_inbox()?;
-
-    let mut inbox_tasks = todoist_api.get_project_tasks(&inbox)?;
+    let mut todoist_api = TodoistAPI::new(&config.keys.todoist_api_key);
+    let mut inbox_tasks = todoist_api.get_inbox_tasks()?;
     inbox_tasks = todoist_api.get_lonely_tasks(&inbox_tasks);
     inbox_tasks.sort_by_key(|t| t.content.clone());
     info!("Retrieved todoist tasks.");
