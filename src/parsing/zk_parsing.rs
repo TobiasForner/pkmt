@@ -235,8 +235,12 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                                 c.get(1),
                                 file_link_re.as_str()
                             );
-
                             let mf = if path.exists() {
+                                MentionedFile::FilePath(path)
+                            } else if let Some(dir) = file_dir
+                                && dir.join(&path).exists()
+                                && let Ok(path) = dir.join(&path).canonicalize()
+                            {
                                 MentionedFile::FilePath(path)
                             } else {
                                 MentionedFile::FileName(
