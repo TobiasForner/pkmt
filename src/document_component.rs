@@ -37,27 +37,23 @@ impl FileInfo {
         }
         None
     }
+    pub fn new_same_file(file: PathBuf) -> Self {
+        Self {
+            original_file: file,
+            destination_file: None,
+            image_dirs: None,
+        }
+    }
 
-    pub fn try_new(
+    pub fn new(
         original_file: PathBuf,
         destination_file: Option<PathBuf>,
-        image_in_dir: Option<PathBuf>,
-        image_out_dir: Option<PathBuf>,
-    ) -> Result<Self> {
-        match (image_in_dir, image_out_dir) {
-            (Some(image_in), Some(image_out)) => Ok(FileInfo {
-                original_file,
-                destination_file,
-                image_dirs: Some((image_in, image_out)),
-            }),
-            (None, None) => Ok(FileInfo {
-                original_file,
-                destination_file,
-                image_dirs: None,
-            }),
-            _ => bail!(
-                "Image input directory and image output directory need to be either both set or unset, but got mixture!"
-            ),
+        image_dirs: Option<(PathBuf, PathBuf)>,
+    ) -> Self {
+        Self {
+            original_file,
+            destination_file,
+            image_dirs,
         }
     }
 }
@@ -1188,8 +1184,7 @@ pub fn convert_tree(
     target_dir: PathBuf,
     inmode: TextMode,
     outmode: TextMode,
-    image_dir: &Option<PathBuf>,
-    image_out_dir: &Option<PathBuf>,
+    image_dirs: Option<(PathBuf, PathBuf)>,
 ) -> Result<Vec<String>> {
     let root_dir = root_dir.canonicalize()?;
     let files = files_in_tree(&root_dir, &Some(vec!["md"]))?;
@@ -1203,12 +1198,7 @@ pub fn convert_tree(
         .map(|f| {
             let rel = pathdiff::diff_paths(f, &root_dir).unwrap();
             let target = target_dir.join(&rel);
-            let file_info = FileInfo::try_new(
-                f.clone(),
-                Some(target),
-                image_dir.clone(),
-                image_out_dir.clone(),
-            )?;
+            let file_info = FileInfo::new(f.clone(), Some(target), image_dirs.clone());
             convert_file(file_info, inmode.clone(), outmode.clone())
         })
         .collect::<Result<Vec<Vec<String>>>>();

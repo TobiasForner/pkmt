@@ -196,8 +196,7 @@ impl ZkHandler {
         let mut pd = parse_file(&journal_path, &TextMode::Zk)?;
         debug!("adding {dc:?} to journal file");
         pd.add_component(dc);
-        let file_info =
-            FileInfo::try_new(journal_path.clone(), Some(journal_path.clone()), None, None)?;
+        let file_info = FileInfo::new_same_file(journal_path.clone());
         let journal_text = pd.to_zk_text(&Some(file_info));
         debug!("new journal text: {journal_text:?}");
 
@@ -290,7 +289,7 @@ impl TaskDataHandler for ZkHandler {
         let mut pd = pd?;
         let success = self.add_to_zk_pd(&mut pd, task_data, &Some(zk_file.clone()));
         if success {
-            let file_info = FileInfo::try_new(zk_file.clone(), Some(zk_file.clone()), None, None)?;
+            let file_info = FileInfo::new_same_file(zk_file.clone());
             let text = pd.to_zk_text(&Some(file_info));
             debug!("added {task_data:?} to pd with result: {text:?}");
 

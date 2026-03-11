@@ -278,20 +278,19 @@ fn run() -> Result<()> {
             imdir,
             imout,
         }) => {
-            let mut imdir = imdir;
-            let mut imout = imout;
+            let mut imdirs = None;
             if let (Some(im_in), Some(im_out)) = (&imdir, &imout) {
                 if !im_out.exists() {
                     std::fs::create_dir_all(im_out)?;
                 }
-                imdir = Some(im_in.canonicalize()?);
-                imout = Some(im_out.canonicalize()?);
+                let imdir = im_in.canonicalize()?;
+                let imout = im_out.canonicalize()?;
+                imdirs = Some((imdir, imout));
             }
             let mentioned_files = if in_path.is_dir() {
-                convert_tree(in_path, out_path, inmode, outmode, &imdir, &imout)
+                convert_tree(in_path, out_path, inmode, outmode, imdirs)
             } else {
-                let file_info =
-                    FileInfo::try_new(in_path, Some(out_path), imdir.clone(), imout.clone())?;
+                let file_info = FileInfo::new(in_path, Some(out_path), imdirs);
                 convert_file(file_info, inmode, outmode)
             }?;
 
