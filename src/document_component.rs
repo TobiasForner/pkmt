@@ -115,7 +115,55 @@ impl ParsedDocument {
         }
     }
 
-    pub fn _get_document_component(
+    pub fn get_title(&self, mode: &TextMode) -> Option<String> {
+        use TextMode::*;
+        match mode {
+            Zk => {
+                let frontmatter = self.get_document_component(&|comp|matches!(comp, DocumentComponent::Frontmatter(properties) if properties.iter().any(|p|p.has_name("title"))));
+                if let Some(DocumentComponent::Frontmatter(properties)) = frontmatter {
+                    let title = properties
+                        .iter()
+                        .find(|p| p.has_name("title"))
+                        .iter()
+                        .filter_map(|p| {
+                            if p.prop_type == PropType::Single
+                                && let Some(PropValue::String(title)) = p.values.first()
+                            {
+                                Some(title.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .next();
+                    if title.is_some() {
+                        return title;
+                    }
+                } else if let Some(DocumentComponent::Heading(_, text)) = self
+                    .get_document_component(&|comp| {
+                        matches!(comp, DocumentComponent::Heading(_, _))
+                    })
+                {
+                    return Some(text.to_string());
+                } else if let ParsedDocument::ParsedFile(_, path) = self {
+                    if let Some(file_name) = path.file_name() {
+                        let mut file_name = file_name.to_str().unwrap();
+                        if let Some((name, _)) = file_name.rsplit_once('.') {
+                            file_name = name;
+                        }
+                        if let Some((_, name)) = file_name.split_once('-') {
+                            return Some(name.to_string());
+                        }
+                    } else {
+                        return Some(path.to_str().unwrap().to_string());
+                    }
+                }
+                None
+            }
+            _ => todo!(),
+        }
+    }
+
+    pub fn get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
@@ -173,6 +221,26 @@ impl ParsedDocument {
             }
             let mut rec = comp.get_all_document_components(selector);
             res.append(&mut rec);
+        }
+
+        res
+    }
+    pub fn get_all_document_components_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<&mut DocumentComponent> {
+        use ParsedDocument::*;
+        let mut res: Vec<&mut DocumentComponent> = vec![];
+        let comps = match self {
+            ParsedFile(comps, _) => comps,
+            ParsedText(comps) => comps,
+        };
+        for comp in comps.iter_mut() {
+            if selector(comp) {
+                res.push(comp);
+            } else {
+                res.append(&mut comp.get_all_document_components_mut(selector));
+            }
         }
 
         res
@@ -530,6 +598,9 @@ impl Property {
     pub fn has_value(&self, value: &PropValue) -> bool {
         self.values.iter().any(|v| v == value)
     }
+    pub fn has_value_pred(&self, predicate: &dyn Fn(&PropValue) -> bool) -> bool {
+        self.values.iter().any(predicate)
+    }
 
     pub fn add_values(&mut self, values: &[PropValue]) {
         values.iter().for_each(|v| {
@@ -574,14 +645,26 @@ impl PropValue {
                 Zk => match mf {
                     MentionedFile::FilePath(p) => {
                         let mut p = p.clone();
-                        if let Some(file_info) = file_info
-                            && let Some(dest) = &file_info.destination_file
-                            && let Some(parent) = dest.parent()
-                        {
-                            let rel = pathdiff::diff_paths(&p, parent);
-                            debug!("determined relative path {rel:?}");
-                            if let Some(rel) = rel {
-                                p = rel;
+                        if let Some(file_info) = file_info {
+                            if let Some(dest) = &file_info.destination_file
+                                && let Some(parent) = dest.parent()
+                            {
+                                // TODO: check whether this is really the way this should work
+                                // Ideally, I would imagine that we may want to preserve the
+                                // original file structure, but in a different file tree
+                                // In this case, this should probably still be relative to the
+                                // original file (as that file is also converted to a new location)
+                                let rel = pathdiff::diff_paths(&p, parent);
+                                debug!("determined relative path {rel:?} to destination_file");
+                                if let Some(rel) = rel {
+                                    p = rel;
+                                }
+                            } else if let Some(parent) = file_info.original_file.parent() {
+                                let rel = pathdiff::diff_paths(&p, parent);
+                                debug!("determined relative path {rel:?} to original file");
+                                if let Some(rel) = rel {
+                                    p = rel;
+                                }
                             }
                         }
                         let p = p.as_os_str();
@@ -677,14 +760,14 @@ impl ListElem {
         res
     }
 
-    pub fn _get_document_component(
+    pub fn get_document_component(
         &self,
         selector: &dyn Fn(&DocumentComponent) -> bool,
     ) -> Option<DocumentComponent> {
-        self.contents._get_document_component(selector).or_else(|| {
+        self.contents.get_document_component(selector).or_else(|| {
             self.children
                 .iter()
-                .map(|le| le._get_document_component(selector))
+                .map(|le| le.get_document_component(selector))
                 .find(|c| c.is_some())
                 .flatten()
         })
@@ -723,6 +806,19 @@ impl ListElem {
             .children
             .iter()
             .flat_map(|c| c.get_all_document_components(selector).into_iter())
+            .collect();
+        res.append(&mut rec);
+        res
+    }
+    pub fn get_all_document_components_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<&mut DocumentComponent> {
+        let mut res = self.contents.get_all_document_components_mut(selector);
+        let mut rec = self
+            .children
+            .iter_mut()
+            .flat_map(|c| c.get_all_document_components_mut(selector).into_iter())
             .collect();
         res.append(&mut rec);
         res
@@ -888,7 +984,7 @@ impl DocumentComponent {
         } else if let List(list_elements, _) = self {
             list_elements
                 .iter()
-                .find_map(|le| le._get_document_component(selector))
+                .find_map(|le| le.get_document_component(selector))
         } else {
             None
         }
@@ -1085,6 +1181,22 @@ impl DocumentComponent {
             List(list_elements, _) => list_elements
                 .iter()
                 .flat_map(|le| le.get_all_document_components(selector).into_iter())
+                .collect(),
+
+            _ => vec![],
+        }
+    }
+
+    pub fn get_all_document_components_mut(
+        &mut self,
+        selector: &dyn Fn(&DocumentComponent) -> bool,
+    ) -> Vec<&mut DocumentComponent> {
+        use DocumentComponent::*;
+        match self {
+            Admonition(comps, _) => comps.iter_mut().filter(|c| selector(c)).collect(),
+            List(list_elements, _) => list_elements
+                .iter_mut()
+                .flat_map(|le| le.get_all_document_components_mut(selector).into_iter())
                 .collect(),
 
             _ => vec![],
