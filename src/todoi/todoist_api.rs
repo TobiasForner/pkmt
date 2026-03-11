@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::util::{FileLocation, FileStorage};
+
 /*
 {
   "results": [
@@ -74,38 +76,13 @@ pub struct TodoistTask {
     pub parent_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct TodoistAPIData {
     inbox_id: Option<String>,
 }
 
-impl TodoistAPIData {
-    pub fn parse_or_new() -> Self {
-        if let Ok(res) = TodoistAPIData::parse() {
-            res
-        } else {
-            Self { inbox_id: None }
-        }
-    }
-    pub fn parse() -> Result<Self> {
-        let data_path = TodoistAPIData::todoist_api_data_path();
-        let text = std::fs::read_to_string(&data_path)
-            .context(format!(
-                "Failed to read todoist_api_data file {data_path:?}"
-            ))?
-            .replace("\r\n", "\n");
-        toml::from_str(&text).context("Failed to parse tags!")
-    }
-
-    fn write(&self) -> Result<()> {
-        let data_path = TodoistAPIData::todoist_api_data_path();
-        let text =
-            toml::to_string(self).context(format!("Failed to convert tags to string: {self:?}"))?;
-        std::fs::write(&data_path, text)
-            .context(format!("Failed to write todoist api data to {data_path:?}"))?;
-        Ok(())
-    }
-    fn todoist_api_data_path() -> PathBuf {
+impl FileLocation for TodoistAPIData {
+    fn get_file_location() -> PathBuf {
         let dirs = directories::ProjectDirs::from("TF", "TF", "pkmt").unwrap();
         dirs.config_local_dir().join("todoist_api_data.toml")
     }
@@ -129,7 +106,7 @@ pub struct TodoistAPI {
 
 impl TodoistAPI {
     pub fn new(todoist_api_key: &str) -> Self {
-        let api_data = TodoistAPIData::parse_or_new();
+        let api_data = TodoistAPIData::load_or_new();
         Self {
             todoist_api_key: todoist_api_key.to_string(),
             api_data,
@@ -147,7 +124,7 @@ impl TodoistAPI {
                 .find(|p| p.inbox_project);
             let inbox = inbox_candidates.context("Inbox does not exist!")?;
             self.api_data.inbox_id = Some(inbox.id.clone());
-            _ = self.api_data.write();
+            _ = self.api_data.store();
             Ok(inbox)
         }
     }

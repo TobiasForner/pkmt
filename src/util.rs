@@ -1,7 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Debug,
+    path::{Path, PathBuf},
+};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use regex::Captures;
+use serde::{Serialize, de::DeserializeOwned};
 use tracing::{debug, instrument};
 
 pub const SPACES_PER_INDENT: usize = 4;
@@ -138,5 +142,40 @@ pub fn _overlapping_captures(
         };
         pos = captures.get(move_after_ith_group).unwrap().end();
         res.push(captures);
+    }
+}
+
+pub trait FileLocation {
+    fn get_file_location() -> PathBuf;
+}
+
+pub trait FileStorage
+where
+    Self: Sized,
+{
+    fn load_or_new() -> Self;
+    fn store(&self) -> Result<()>;
+
+    fn load() -> Result<Self>;
+}
+
+impl<T: Sized + FileLocation + Serialize + DeserializeOwned + Debug + Default> FileStorage for T {
+    fn load_or_new() -> Self {
+        T::load().unwrap_or_default()
+    }
+    fn store(&self) -> Result<()> {
+        let data_path = T::get_file_location();
+        let text = toml::to_string(self).context(format!("Failed to serialize: {self:?}"))?;
+        std::fs::write(&data_path, text)
+            .context(format!("Failed to write data to {data_path:?}"))?;
+        Ok(())
+    }
+
+    fn load() -> Result<Self> {
+        let data_path = T::get_file_location();
+        let text = std::fs::read_to_string(&data_path)
+            .context(format!("Failed to read file {data_path:?}"))?
+            .replace("\r\n", "\n");
+        toml::from_str(&text).context("Failed to parse {text:?}!")
     }
 }

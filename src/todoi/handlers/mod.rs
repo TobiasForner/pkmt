@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use crate::{
     document_component::{DocumentComponent, PropValue},
@@ -10,9 +10,11 @@ use crate::{
         handlers::{logseq_handler::LogSeqHandler, zk_handler::ZkHandler},
         todoist_api::TodoistTask,
     },
+    util::{FileLocation, FileStorage},
 };
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 use tracing::instrument;
 
@@ -35,11 +37,18 @@ pub fn handle_tasks(
         TextMode::LogSeq => Box::new(LogSeqHandler::new(root_dir.to_path_buf())?),
         _ => todo!(),
     };
-    let all_urls = get_all_urls(root_dir, mode)?;
+    let mut url_cache = UrlCache::load_or_new();
+    if url_cache.urls.is_empty()
+        && let Ok(urls) = get_all_urls(root_dir, mode)
+    {
+        urls.iter().for_each(|url| {
+            let _ = url_cache.urls.insert(url.to_string());
+        });
+    }
     let deduped_tasks: Vec<TodoistTask> = tasks
         .iter()
         .filter_map(|t| {
-            if all_urls.iter().any(|u| t.content.contains(u)) {
+            if url_cache.urls.iter().any(|u| t.content.contains(u)) {
                 println!("Found DUPLICATE task: {}", t.content);
                 None
             } else {
@@ -48,6 +57,12 @@ pub fn handle_tasks(
         })
         .collect();
     let tasks = get_task_data_full(&deduped_tasks, config, &handler.get_template_names()?);
+    tasks.iter().for_each(|(td, _)| {
+        if let Some(url) = td.get_url() {
+            url_cache.urls.insert(url.to_string());
+        }
+    });
+    _ = url_cache.store();
 
     let style = ProgressStyle::with_template("[{elapsed}] {msg} {bar}").unwrap();
     let bar = ProgressBar::new(tasks.len() as u64).with_style(style);
@@ -99,4 +114,16 @@ fn get_all_urls(root_dir: &PathBuf, mode: TextMode) -> Result<Vec<String>> {
         .flatten()
         .collect();
     Ok(tmp)
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct UrlCache {
+    urls: HashSet<String>,
+}
+
+impl FileLocation for UrlCache {
+    fn get_file_location() -> PathBuf {
+        let dirs = directories::ProjectDirs::from("TF", "TF", "pkmt").unwrap();
+        dirs.config_local_dir().join("url_cache.toml")
+    }
 }

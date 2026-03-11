@@ -197,6 +197,18 @@ impl TaskData {
             Reddit(_, _, tags) => tags.clone(),
         }
     }
+
+    pub fn get_url(&self) -> Option<&str> {
+        use TaskData::*;
+        match self {
+            Unhandled => None,
+            Youtube(url, _, _, _) => Some(url),
+            Sbs(url, _, _, _, _) => Some(url),
+            YtPlaylist(url, _, _) => Some(url),
+            Interactive(_, url, _, _, _) => url.as_deref(),
+            Reddit(url, _, _) => Some(url),
+        }
+    }
 }
 
 fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
