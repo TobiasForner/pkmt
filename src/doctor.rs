@@ -359,3 +359,95 @@ fn redirect_file_mentions(
 
     Ok(all_overwritten)
 }
+
+fn check_creator_file(root_dir: &Path, threshold: usize, fix: bool) -> Result<()> {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let data_dir = base_dirs.data_dir().join("pkmt");
+        if !data_dir.exists() {
+            std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
+        }
+
+        let lookup_path = data_dir.join("creator_lookup.toml");
+        let mut lookup: HashMap<String, PathBuf> = if lookup_path.exists() {
+            let text = std::fs::read_to_string(&lookup_path)
+                .context("Expected {lookup_path:?} to exist!")?;
+            toml::from_str(&text)?
+        } else {
+            return Ok(());
+        };
+        lookup.iter_mut().for_each(|(name, file_path)| {
+            if !file_path.exists() {
+                println!("Lookup file path for '{name}' does not exist: {file_path:?}");
+                if fix {
+                    let files = files_in_tree(root_dir, &Some(vec!["md"])).unwrap();
+
+                    let dot_zk_dir = root_dir.to_path_buf().join(".zk");
+                    let journal_dir = root_dir.to_path_buf().join("journal");
+                    let file_names: Vec<(String, PathBuf)> = files
+                        .iter()
+                        .filter(|f| {
+                            !f.components()
+                                .any(|c| c.as_os_str().to_str().unwrap() == "bak")
+                                && !f.starts_with(&dot_zk_dir)
+                                && !f.starts_with(&journal_dir)
+                        })
+                        .map(|f| {
+                            (
+                                f.file_name().unwrap().to_string_lossy().to_string(),
+                                f.clone(),
+                            )
+                        })
+                        .collect();
+                    if let Some((_, title)) = file_path
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .split_once('-')
+                    {
+                        let mut candidates: Vec<_> = file_names
+                            .iter()
+                            .filter_map(|(file_name, fn_path)| {
+                                file_name.split_once('-').map(|parts| {
+                                    let ed = edit_distance(parts.1, title);
+                                    if ed <= threshold {
+                                        Some((file_name, fn_path, ed))
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .flatten()
+                            .collect();
+                        candidates.sort_by_key(|e| e.2);
+                        if let Some(candidate) = candidates.first() {
+                            println!("===== {:?} =====", candidate.1);
+                            let text = std::fs::read_to_string(candidate.1);
+                            if let Ok(text) = text {
+                                println!("{text}");
+                            }
+                            println!("==========");
+                            let answer = get_user_input_choices(
+                                &format!("Should it be replaced by {:?}?", candidate.1),
+                                vec!["y".to_string(), "n".to_string()],
+                            );
+                            if let Some(answer) = answer
+                                && answer == "y"
+                            {
+                                *file_path = candidate.1.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        if fix {
+            let text = toml::to_string(&lookup)?;
+            std::fs::write(&lookup_path, text)
+                .context(format!("Could not write to {lookup_path:?}"))?;
+        }
+        Ok(())
+    } else {
+        bail!("Could not create basedirs!")
+    }
+}
