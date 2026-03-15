@@ -254,6 +254,16 @@ impl ZkHandler {
         }
     }
 
+    pub fn delete_creator_file_entry(&self, name: &str) -> Result<()> {
+        let mut creators_lookup = self.load_creators_lookup()?;
+        creators_lookup
+            .remove_entry(name)
+            .context(format!("Failed to delete entry for '{name}'."))?;
+        self.store_creators_lookup(&creators_lookup)?;
+        println!("Successfully deleted the entry for '{name}'.");
+        Ok(())
+    }
+
     pub fn get_file_for_creator(&self, name: &str) -> Result<PathBuf> {
         let mut lookup: HashMap<String, PathBuf> = self.load_creators_lookup()?;
         if let Some(path) = lookup.get(name) {

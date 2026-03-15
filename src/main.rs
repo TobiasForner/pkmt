@@ -345,7 +345,8 @@ fn run() -> Result<()> {
                 TextMode::Zk => {
                     match creator_command {
                         CreatorCommand::Delete => {
-                            todo!("not implemented!")
+                            let handler = ZkHandler::new(root_dir);
+                            let _ = handler.delete_creator_file_entry(&name);
                         }
                         CreatorCommand::Overwrite { new_file } => {
                             set_zk_creator_file(&name, &new_file, &root_dir)?;
