@@ -15,6 +15,10 @@ use crate::{
     },
 };
 
+/// original_file is the file that was parsed
+/// destination_file: the file the current contents will be written to. If this is set to 'None',
+/// it is assumed that the original_file is the destination_file as well
+/// image dirs: (original_image_dir, destination_image_dir)
 #[derive(Clone, Debug)]
 pub struct FileInfo {
     original_file: PathBuf,
@@ -1043,14 +1047,17 @@ impl DocumentComponent {
                 MentionedFile::FilePath(p) => {
                     debug!("file link: {file:?}; {name:?}");
                     let mut p = p.clone();
-                    if let Some(file_info) = file_info
-                        && let Some(dest) = &file_info.destination_file
-                        && let Some(parent) = dest.parent()
-                    {
-                        let rel = pathdiff::diff_paths(&p, parent);
-                        debug!("determined relative path {rel:?}");
-                        if let Some(rel) = rel {
-                            p = rel;
+                    if let Some(file_info) = file_info {
+                        let destination = file_info
+                            .destination_file
+                            .clone()
+                            .unwrap_or(file_info.original_file.clone());
+                        if let Some(parent) = destination.parent() {
+                            let rel = pathdiff::diff_paths(&p, parent);
+                            debug!("determined relative path {rel:?}");
+                            if let Some(rel) = rel {
+                                p = rel;
+                            }
                         }
                     }
                     let p = p.as_os_str();
