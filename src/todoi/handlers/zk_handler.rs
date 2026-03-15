@@ -86,7 +86,7 @@ impl ZkHandler {
         prop_name: &str,
         file_dir: &Option<PathBuf>,
     ) -> Result<bool> {
-        let file = self.get_file_for_creator(author)?;
+        let file = self.get_file_for_creator(author, true)?;
         debug!("Found creator file {file:?} for {author:?}");
         self.fill_props(
             pd,
@@ -264,12 +264,15 @@ impl ZkHandler {
         Ok(())
     }
 
-    pub fn get_file_for_creator(&self, name: &str) -> Result<PathBuf> {
+    pub fn get_file_for_creator(&self, name: &str, create_missing: bool) -> Result<PathBuf> {
         let mut lookup: HashMap<String, PathBuf> = self.load_creators_lookup()?;
         if let Some(path) = lookup.get(name) {
             debug!("{name:?}: found creator file in lookup: {path:?}");
             Ok(path.to_path_buf())
         } else {
+            if !create_missing {
+                bail!("Could not find creator file for '{name}'.")
+            }
             let template_file = self
                 .root_dir
                 .join(".zk")
@@ -305,7 +308,8 @@ impl ZkHandler {
         if file_path.exists() {
             let text = std::fs::read_to_string(&file_path)
                 .context("Expected {creator_file:?} to exist!")?;
-            toml::from_str::<HashMap<String, PathBuf>>(&text).context("")
+            toml::from_str::<HashMap<String, PathBuf>>(&text)
+                .context("Failed to parse zk creators file")
         } else {
             debug!("creating now lookup table.");
             Ok(HashMap::new())

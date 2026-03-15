@@ -160,6 +160,9 @@ enum CreatorCommand {
     ShowFile {
         #[arg(short, long)]
         relative: Option<PathBuf>,
+
+        #[arg(short, long, default_value_t = false)]
+        create_missing: bool,
     },
 }
 
@@ -351,16 +354,24 @@ fn run() -> Result<()> {
                         CreatorCommand::Overwrite { new_file } => {
                             set_zk_creator_file(&name, &new_file, &root_dir)?;
                         }
-                        CreatorCommand::ShowFile { relative } => {
+                        CreatorCommand::ShowFile {
+                            relative,
+                            create_missing,
+                        } => {
                             let handler = ZkHandler::new(root_dir);
-                            let mut file = handler.get_file_for_creator(&name)?;
-                            if let Some(relative) = relative
-                                && let Some(rel) = relative.parent()
-                                && let Some(rel) = pathdiff::diff_paths(&file, rel)
+                            if let Ok(mut creator_file) =
+                                handler.get_file_for_creator(&name, create_missing)
                             {
-                                file = rel.to_path_buf();
+                                if let Some(relative) = relative
+                                    && let Some(rel) = relative.parent()
+                                    && let Some(rel) = pathdiff::diff_paths(&creator_file, rel)
+                                {
+                                    creator_file = rel.to_path_buf();
+                                }
+                                println!("{}", creator_file.to_string_lossy());
+                            } else {
+                                println!("Could not find a creator file for '{name}'");
                             }
-                            println!("{}", file.to_string_lossy());
                         }
                     }
                     Ok(())
