@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use todoi::handlers::zk_handler::{get_zk_creator_file, set_zk_creator_file};
+use todoi::handlers::zk_handler::set_zk_creator_file;
 use tracing::Level;
 use tracing_subscriber::{
     EnvFilter,
@@ -348,11 +348,11 @@ fn run() -> Result<()> {
                             todo!("not implemented!")
                         }
                         CreatorCommand::Overwrite { new_file } => {
-                            set_zk_creator_file(&name, &new_file)?;
+                            set_zk_creator_file(&name, &new_file, &root_dir)?;
                         }
                         CreatorCommand::ShowFile { relative } => {
                             let handler = ZkHandler::new(root_dir);
-                            let mut file = get_zk_creator_file(&handler, &name)?;
+                            let mut file = handler.get_file_for_creator(&name)?;
                             if let Some(relative) = relative
                                 && let Some(rel) = relative.parent()
                                 && let Some(rel) = pathdiff::diff_paths(&file, rel)
