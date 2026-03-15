@@ -17,6 +17,7 @@ pub fn get_interactive_data(
     config: &Config,
 ) -> (Resolution, TaskData) {
     use Resolution::*;
+    println!("####################");
     println!("{}", task.content);
     println!("Please choose the template to use:");
     template_names
