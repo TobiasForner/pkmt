@@ -52,9 +52,13 @@ pub fn get_interactive_data(
     if let Some(captures) = url_re.captures(&content) {
         let mut tags = vec![];
         let title = if let Some(title) = captures.get(1) {
-            let title = title.as_str().to_string();
+            let title = title.as_str().trim().to_string();
             tags = config.get_keyword_tags(&title);
-            Some(title)
+            if title.is_empty() {
+                Some("untitled".to_string())
+            } else {
+                Some(title)
+            }
         } else {
             println!("No title capture: {content}");
             None
