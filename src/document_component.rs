@@ -473,7 +473,28 @@ impl MentionedFile {
 
                 format!("{{{{embed [[{file_name}]]}}}}")
             }
-
+            Zk => match self {
+                FileName(name) => name.to_string(),
+                FilePath(p) => {
+                    let mut p = p.clone();
+                    if let Some(file_info) = file_info {
+                        let destination = file_info
+                            .destination_file
+                            .clone()
+                            .unwrap_or(file_info.original_file.clone());
+                        if let Some(parent) = destination.parent() {
+                            let rel = pathdiff::diff_paths(&p, parent);
+                            debug!("determined relative path {rel:?}");
+                            if let Some(rel) = rel {
+                                p = rel;
+                            }
+                        }
+                    }
+                    let p = p.as_os_str();
+                    let p = p.to_string_lossy();
+                    p.to_string()
+                }
+            },
             other => todo!("not implemented: conversion of mentioned file to {other:?}"),
         }
     }
@@ -1044,24 +1065,9 @@ impl DocumentComponent {
                         format!("[{mentioned_name}]({mentioned_name})")
                     }
                 }
-                MentionedFile::FilePath(p) => {
+                MentionedFile::FilePath(_) => {
+                    let p = file._to_mode_text(file_info, TextMode::Zk);
                     debug!("file link: {file:?}; {name:?}");
-                    let mut p = p.clone();
-                    if let Some(file_info) = file_info {
-                        let destination = file_info
-                            .destination_file
-                            .clone()
-                            .unwrap_or(file_info.original_file.clone());
-                        if let Some(parent) = destination.parent() {
-                            let rel = pathdiff::diff_paths(&p, parent);
-                            debug!("determined relative path {rel:?}");
-                            if let Some(rel) = rel {
-                                p = rel;
-                            }
-                        }
-                    }
-                    let p = p.as_os_str();
-                    let p = p.to_string_lossy();
                     if let Some(name) = name {
                         let sanitized_name = name.replace(['[', ']'], "");
                         format!("[{sanitized_name}]({p})")
