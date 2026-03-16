@@ -35,8 +35,8 @@ pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String
         let text = runtime.block_on(res?.text())?;
         let mut js = json::parse(&text)?;
         let snippet = js["items"].pop()["snippet"].clone();
-        let title = snippet["title"].to_string();
-        let channel = snippet["channelTitle"].to_string();
+        let title = snippet["title"].to_string().trim().to_string();
+        let channel = snippet["channelTitle"].to_string().trim().to_string();
 
         Ok((title, channel))
     } else {
@@ -58,9 +58,13 @@ pub fn youtube_playlist_details(playlist_url: &str, api_key: &str) -> Result<(St
         let text = runtime.block_on(res?.text())?;
         let mut js = json::parse(&text)?;
         let snippet = js["items"].pop()["snippet"].clone();
-        let title = snippet["title"].to_string();
-        let channel = snippet["channelTitle"].to_string();
-        let description = snippet["description"].to_string().replace("\n", " ");
+        let title = snippet["title"].to_string().trim().to_string();
+        let channel = snippet["channelTitle"].to_string().trim().to_string();
+        let description = snippet["description"]
+            .to_string()
+            .replace("\n", " ")
+            .trim()
+            .to_string();
 
         return Ok((format!("{title}: {description}"), channel));
     }

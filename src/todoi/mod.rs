@@ -260,7 +260,7 @@ fn handle_sbs_task(task: &TodoistTask) -> TaskData {
         let text = runtime.block_on(res.text()).unwrap();
 
         let author = if let Some(author) = author_re.captures(&text) {
-            let mut author = author.get(1).unwrap().as_str().to_string();
+            let mut author = author.get(1).unwrap().as_str().trim().to_string();
             if author.ends_with('.') {
                 author.remove(author.len() - 1);
             }
@@ -282,7 +282,9 @@ fn handle_sbs_task(task: &TodoistTask) -> TaskData {
 
         let title = if let (Some(start), Some(end)) = (text.find("<title>"), text.find("</title>"))
         {
-            let title = text[start + 7..end].trim_end_matches(" &#8226; Stronger by Science");
+            let title = text[start + 7..end]
+                .trim_end_matches(" &#8226; Stronger by Science")
+                .trim();
             Some(title.to_string())
         } else {
             None
@@ -314,11 +316,11 @@ pub fn handle_reddit_post(task: &TodoistTask, config: &Config) -> Result<TaskDat
     if let Some(c) = reddit_re.captures(&task.content)
         && let Some(url) = c.get(0)
     {
-        let url = url.as_str();
+        let url = url.as_str().trim().to_string();
         let client = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (platform; rv:gecko-version) Gecko/gecko-trail Firefox/18.0")
             .build()?;
-        let resolved = client.get(url).send();
+        let resolved = client.get(&url).send();
         let runtime = tokio::runtime::Runtime::new()?;
         let res = runtime.block_on(resolved);
         if let Ok(res) = res {
@@ -332,7 +334,11 @@ pub fn handle_reddit_post(task: &TodoistTask, config: &Config) -> Result<TaskDat
                 let title = sel.value().attr("title");
                 if let Some(title) = title {
                     let tags = config.get_keyword_tags(title);
-                    return Ok(TaskData::Reddit(url.to_string(), title.to_string(), tags));
+                    return Ok(TaskData::Reddit(
+                        url.to_string(),
+                        title.trim().to_string(),
+                        tags,
+                    ));
                 }
             }
         }
