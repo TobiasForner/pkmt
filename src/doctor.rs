@@ -17,6 +17,7 @@ pub fn doctor(root_dir: &Path, fix: bool) -> Result<()> {
     list_empty_files(root_dir)?;
     problematic_file_titles(&mut parsed_documents, fix)?;
     similar_file_names(&mut parsed_documents, root_dir, 2, &mode, fix)?;
+    mentiened_files_titles(&mut parsed_documents, &mode);
     check_creator_file(root_dir, 2, fix)
 }
 
@@ -451,4 +452,45 @@ fn check_creator_file(root_dir: &Path, threshold: usize, fix: bool) -> Result<()
     } else {
         bail!("Could not create basedirs!")
     }
+}
+
+fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMode) {
+    let title_by_path: HashMap<PathBuf, String> = parsed_documents
+        .iter()
+        .filter_map(|pd| {
+            if let Some(fp) = pd.get_file_path() {
+                pd.get_title(mode).map(|title| (fp, title))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    parsed_documents.iter_mut().for_each(|pd| {
+        let mut found_comps = Vec::new();
+        while let Some(DocumentComponent::FileLink(mf, sec, name)) =
+            pd.get_document_component_mut(&|comp| {
+                if !found_comps.iter().any(|c| c == comp)
+                    && let DocumentComponent::FileLink(
+                        MentionedFile::FilePath(mf_path),
+                        _,
+                        Some(fl_name),
+                    ) = comp
+                    && let Some(actual_title) = title_by_path.get(mf_path)
+                    && actual_title != fl_name
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+        {
+            let comp = DocumentComponent::FileLink(mf.clone(), sec.clone(), name.clone());
+            if let MentionedFile::FilePath(mf_path) = mf {
+                let actual_title = title_by_path.get(mf_path).unwrap();
+                println!("found: {comp:?}; title: {name:?}; actual title: {actual_title:?}");
+            }
+            found_comps.push(comp);
+        }
+    });
 }

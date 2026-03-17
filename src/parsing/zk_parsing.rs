@@ -225,11 +225,14 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                         // check whether this is a file link
                         let remaining = lexer.remainder();
                         debug!("checking for file link: remaining: {remaining:?}");
-                        if let Some(c) = file_link_re.captures(remaining) {
+                        if let Some(c) = file_link_re.captures(remaining)
+                            && let Some((name, file_path)) = parse_md_file_link(remaining)
+                        {
+                            let file_link_len = name.len() + file_path.len() + 3;
                             debug!("file link match!");
-                            let name = c.get(1).map(|name| name.as_str().to_string());
-                            let Some(path) = c.get(2) else { panic!("") };
-                            let path = PathBuf::from_str(path.as_str())?;
+                            //let name = c.get(1).map(|name| name.as_str().to_string());
+                            //let Some(path) = c.get(2) else { panic!("") };
+                            let path = PathBuf::from_str(&file_path)?;
                             debug!(
                                 "Got name {name:?} ({:?}) and path {path:?} (regex: {file_link_re:?} ;;; pattern: {})",
                                 c.get(1),
@@ -247,11 +250,10 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
                                     path.as_os_str().to_string_lossy().to_string(),
                                 )
                             };
-                            let file_link = DocumentComponent::FileLink(mf, None, name);
+                            let file_link = DocumentComponent::FileLink(mf, None, Some(name));
                             debug!("Found file link {file_link:?}");
                             res.push(file_link);
 
-                            let cap_len = c.get(0).unwrap().len();
                             let mut consumed = String::new();
 
                             // consume tokens from the lexer until we have consumed the
@@ -266,9 +268,9 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
 
                                 let slice = lexer.slice();
                                 consumed.push_str(slice);
-                                if consumed.len() == cap_len {
+                                if consumed.len() == file_link_len {
                                     break;
-                                } else if consumed.len() > cap_len {
+                                } else if consumed.len() > file_link_len {
                                     bail!(
                                         "Consumed too much while parsing file link!: consumed {consumed:?}, but parsed {:?}",
                                         c.get(0).unwrap()
@@ -322,6 +324,40 @@ pub fn parse_zk_text_inner(text: &str, file_dir: &Option<PathBuf>) -> Result<Par
     }
     let res = collapse_text(&res);
     Ok(ParsedDocument::ParsedText(res))
+}
+
+/// remainder is of the form 'text](path/to/file)', i.e. the opening bracket is already confirmed
+/// returns (text, path/to/file) if successful
+fn parse_md_file_link(remainder: &str) -> Option<(String, String)> {
+    let mut name = String::new();
+    let mut file_path = String::new();
+    let mut in_name = true;
+    let mut in_path = false;
+    let mut open_bracket_count = 0;
+    for (pos, c) in remainder.chars().enumerate() {
+        match c {
+            ']' if open_bracket_count == 0 => {
+                in_name = false;
+            }
+            '[' if in_name => {
+                open_bracket_count += 1;
+            }
+            '(' if !in_name && !in_path => {
+                in_path = true;
+            }
+            ')' if in_path => return Some((name, file_path)),
+            c if in_name => {
+                name.push(c);
+            }
+            c if in_path => {
+                file_path.push(c);
+            }
+            _ => {
+                return None;
+            }
+        };
+    }
+    None
 }
 
 #[instrument]
@@ -958,8 +994,48 @@ fn test_link_in_list() {
     let text =
         "- [Radtour München - Starnberger See](../../txpk-radtour-munchen-starnberger-see.md)";
     let res = parse_zk_text(text, &None).unwrap();
+    assert_eq!(
+        res,
+        ParsedDocument::ParsedText(vec![DocumentComponent::List(
+            vec![ListElem {
+                contents: ParsedDocument::ParsedText(vec![DocumentComponent::FileLink(
+                    MentionedFile::FileName(
+                        "../../txpk-radtour-munchen-starnberger-see.md".to_string()
+                    ),
+                    None,
+                    Some("Radtour München - Starnberger See".to_string())
+                )]),
+                children: vec![]
+            }],
+            false
+        )])
+    );
     let res = res.to_zk_text(&None);
     assert_eq!(res, text);
+}
+
+#[test]
+fn test_two_links_in_one_line() {
+    let text = "[a](a.md), [b](b.md)";
+    let res = parse_zk_text(text, &None).unwrap();
+    assert_eq!(
+        res,
+        ParsedDocument::ParsedText(vec![
+            DocumentComponent::FileLink(
+                MentionedFile::FileName("a.md".to_string()),
+                None,
+                Some("a".to_string())
+            ),
+            DocumentComponent::Text(", ".to_string()),
+            DocumentComponent::FileLink(
+                MentionedFile::FileName("b.md".to_string()),
+                None,
+                Some("b".to_string())
+            )
+        ])
+    );
+    let res = res.to_zk_text(&None);
+    assert_eq!(text, res);
 }
 
 #[test]
