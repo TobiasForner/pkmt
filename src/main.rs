@@ -11,19 +11,21 @@ use tracing_subscriber::{
 extern crate tracing;
 
 mod file_checklist;
-use document_component::{FileInfo, convert_file, convert_tree};
 use file_checklist::checklist_for_tree;
 use util::files_in_tree;
 
 use std::{collections::HashSet, path::PathBuf};
 
 use crate::{
+    convert::{convert_file, convert_tree},
     doctor::doctor,
     todoi::{config::Tags, handlers::zk_handler::ZkHandler},
 };
 mod document_component;
+use crate::convert::FileInfo;
 
 use parsing::TextMode;
+mod convert;
 mod doctor;
 mod parsing;
 mod todoi;

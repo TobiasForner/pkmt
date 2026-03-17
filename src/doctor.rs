@@ -4,8 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::result::Result::Ok;
 
+use crate::convert::FileInfo;
 use crate::document_component::{
-    DocumentComponent, FileInfo, MentionedFile, ParsedDocument, PropValue, Property,
+    DocumentComponent, MentionedFile, ParsedDocument, PropValue, Property,
 };
 use crate::parsing::{TextMode, parse_all_files_in_dir};
 use crate::util::files_in_tree;

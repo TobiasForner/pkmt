@@ -4,11 +4,10 @@ use std::{collections::HashMap, fmt::Debug, fs::DirEntry, path::PathBuf, str::Fr
 use anyhow::{Context, Result, bail};
 use tracing::{debug, info, instrument};
 
+use crate::convert::FileInfo;
 use crate::todoi::{TaskData, handlers::TaskDataHandler};
 use crate::{
-    document_component::{
-        DocumentComponent, FileInfo, ListElem, MentionedFile, ParsedDocument, PropValue,
-    },
+    document_component::{DocumentComponent, ListElem, MentionedFile, ParsedDocument, PropValue},
     parsing::{TextMode, parse_file, zk_parsing},
 };
 
