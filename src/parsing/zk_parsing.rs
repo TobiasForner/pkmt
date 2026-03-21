@@ -334,7 +334,7 @@ fn parse_md_file_link(remainder: &str) -> Option<(String, String)> {
     let mut in_name = true;
     let mut in_path = false;
     let mut open_bracket_count = 0;
-    for (pos, c) in remainder.chars().enumerate() {
+    for c in remainder.chars() {
         match c {
             ']' if open_bracket_count == 0 => {
                 in_name = false;

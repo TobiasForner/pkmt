@@ -8,7 +8,6 @@ use scraper::{Html, Selector};
 use std::{fmt::Debug, path::PathBuf, vec};
 
 use anyhow::{Context, Result, bail};
-use interactive::get_interactive_data;
 use rayon::prelude::*;
 use regex::Regex;
 use tracing::{debug, info, instrument};
@@ -19,7 +18,6 @@ use crate::{
     todoi::{
         config::Config,
         handlers::handle_tasks,
-        interactive::Resolution,
         todoist_api::{TodoistAPI, TodoistTask},
         youtube_details::{youtube_details, youtube_playlist_details},
     },
@@ -125,26 +123,45 @@ fn get_task_data_full(
     template_names: &[String],
 ) -> Vec<(TaskData, TodoistTask)> {
     let tasks = get_task_data_non_interactive(tasks, config);
-    // handle interactive
-    let mut cancelled = false;
-    tasks
+    let mut tasks_todo = vec![];
+    let mut tasks_done = vec![];
+    tasks.into_iter().for_each(|(td, task)| {
+        if let TaskData::Unhandled = td {
+            tasks_todo.push(task);
+        } else {
+            tasks_done.push((td, task));
+        }
+    });
+    let new_results =
+        interactive::get_full_interactive_data(&tasks_todo, template_names, config).unwrap();
+    let mut res = tasks_done;
+    new_results
         .into_iter()
-        .map(|(td, task)| match td {
-            TaskData::Unhandled => {
-                if !cancelled {
-                    let (res, td) = get_interactive_data(&task, template_names, config);
-                    println!("interactive resolution for {task:?}: {res:?} with {td:?}");
-                    if let Resolution::Cancel = res {
-                        cancelled = true;
-                    }
-                    (td, task)
-                } else {
-                    (td, task)
-                }
-            }
-            _ => (td, task),
-        })
-        .collect()
+        .enumerate()
+        .for_each(|(todo_index, (_, td))| {
+            res.push((td, tasks_todo[todo_index].clone()));
+        });
+    //todo!()
+    res
+
+    // tasks
+    //     .into_iter()
+    //     .map(|(td, task)| match td {
+    //         TaskData::Unhandled => {
+    //             if !cancelled {
+    //                 let (res, td) = get_interactive_data(&task, template_names, config);
+    //                 println!("interactive resolution for {task:?}: {res:?} with {td:?}");
+    //                 if let Resolution::Cancel = res {
+    //                     cancelled = true;
+    //                 }
+    //                 (td, task)
+    //             } else {
+    //                 (td, task)
+    //             }
+    //         }
+    //         _ => (td, task),
+    //     })
+    //     .collect()
 }
 
 #[derive(Debug)]
