@@ -467,6 +467,10 @@ fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMo
         .collect();
 
     parsed_documents.iter_mut().for_each(|pd| {
+        let pd_path = pd.get_file_path().unwrap(); //all the pds should have a file path here as
+        //they come from parse_all_files_in_dir
+        // comps that have been found already
+        // this is used to prevent finding the same component every time
         let mut found_comps = Vec::new();
         while let Some(DocumentComponent::FileLink(mf, sec, name)) =
             pd.get_document_component_mut(&|comp| {
@@ -488,7 +492,8 @@ fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMo
             let comp = DocumentComponent::FileLink(mf.clone(), sec.clone(), name.clone());
             if let MentionedFile::FilePath(mf_path) = mf {
                 let actual_title = title_by_path.get(mf_path).unwrap();
-                println!("found: {comp:?}; title: {name:?}; actual title: {actual_title:?}");
+                println!("{pd_path:?}:");
+                println!("\tfound: {mf:?}\n\ttitle: {name:?}\n\tactual title: {actual_title:?}",);
             }
             found_comps.push(comp);
         }
