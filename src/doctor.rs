@@ -149,8 +149,18 @@ fn similar_file_names(
         })
         .collect();
     println!("Found {} files!", file_names.len());
+
+    // simple clustering: all titles pairs are considered. If the edit distance is <= threshold,
+    // the pair is considered similar and the first file name is assigned to the cluster of the
+    // first one
+    // later on, when building the actual clusters ("shortcutting"), the file_names are again
+    // considered in inverse order.
+    // This way, when considering index i<j, we know that clustering[j] is already fully resolved
+    // and it is enough to follow the cluster assignment for a single step
+
     // maps index_a to index_b, both are indices into file_names. Note that file names is a
     // filtered version of parsed_documents (with some more data extracted from the pd)
+    // clustering[a] = b means that the ath file_name is part of the same cluster as the bth file name
     let mut clustering: Vec<usize> = (0..file_names.len()).collect();
     println!("Building initial clustering");
     (0..file_names.len().saturating_sub(1)).for_each(|a| {
