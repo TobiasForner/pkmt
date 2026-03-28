@@ -127,7 +127,7 @@ impl ZkHandler {
             } else {
                 println!(
                     "Failed to find tags in template: {}",
-                    pd.to_string(TextMode::Zk, &None)
+                    pd.to_string(&TextMode::Zk, &None)
                 );
                 false
             }

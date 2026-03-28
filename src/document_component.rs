@@ -24,7 +24,7 @@ pub enum ParsedDocument {
 
 impl ParsedDocument {
     #[instrument]
-    pub fn to_string(&self, outmode: TextMode, file_info: &Option<FileInfo>) -> String {
+    pub fn to_string(&self, outmode: &TextMode, file_info: &Option<FileInfo>) -> String {
         use TextMode::*;
         match outmode {
             Obsidian => todo!("Conversion to Obsidian is not implemented yet!"),
@@ -475,8 +475,8 @@ pub enum PropType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Property {
-    name: String,
-    prop_type: PropType,
+    pub name: String,
+    pub prop_type: PropType,
     pub values: Vec<PropValue>,
 }
 

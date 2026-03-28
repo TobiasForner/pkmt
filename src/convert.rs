@@ -94,7 +94,7 @@ pub fn convert_file(
     if let Ok(pd) = pd {
         let mentioned_files = pd.mentioned_files();
 
-        let text = pd.to_string(outmode, &Some(file_info.clone()));
+        let text = pd.to_string(&outmode, &Some(file_info.clone()));
         let dest_file = file_info
             .destination_file
             .clone()

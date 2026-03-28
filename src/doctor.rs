@@ -1,12 +1,17 @@
 use anyhow::{Context, Result, bail};
 use edit_distance::edit_distance;
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::{DefaultTerminal, Frame};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::result::Result::Ok;
 
 use crate::convert::FileInfo;
 use crate::document_component::{
-    DocumentComponent, MentionedFile, ParsedDocument, PropValue, Property,
+    DocumentComponent, MentionedFile, ParsedDocument, PropType, PropValue, Property,
 };
 use crate::parsing::{TextMode, parse_all_files_in_dir};
 use crate::util::files_in_tree;
@@ -17,7 +22,8 @@ pub fn doctor(root_dir: &Path, fix: bool) -> Result<()> {
     list_empty_files(root_dir)?;
     problematic_file_titles(&mut parsed_documents, fix)?;
     similar_file_names(&mut parsed_documents, root_dir, 2, &mode, fix)?;
-    mentiened_files_titles(&mut parsed_documents, &mode);
+    mentiened_files_titles(&mut parsed_documents, &mode)?;
+    contracted_frontmatter_lists(&mut parsed_documents, fix, &mode)?;
     check_creator_file(root_dir, 2, fix)
 }
 
@@ -464,7 +470,7 @@ fn check_creator_file(root_dir: &Path, threshold: usize, fix: bool) -> Result<()
     }
 }
 
-fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMode) {
+fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMode) -> Result<()> {
     let title_by_path: HashMap<PathBuf, String> = parsed_documents
         .iter()
         .filter_map(|pd| {
@@ -476,8 +482,10 @@ fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMo
         })
         .collect();
 
-    parsed_documents.iter_mut().for_each(|pd| {
-        let pd_path = pd.get_file_path().unwrap(); //all the pds should have a file path here as
+    parsed_documents.iter_mut().try_for_each(|pd| {
+        let pd_path = pd
+            .get_file_path()
+            .context("No file path for parsed document!")?;
         //they come from parse_all_files_in_dir
         // comps that have been found already
         // this is used to prevent finding the same component every time
@@ -507,5 +515,144 @@ fn mentiened_files_titles(parsed_documents: &mut [ParsedDocument], mode: &TextMo
             }
             found_comps.push(comp);
         }
+        Ok(())
+    })
+}
+
+fn contracted_frontmatter_lists(
+    parsed_documents: &mut [ParsedDocument],
+    fix: bool,
+    mode: &TextMode,
+) -> Result<()> {
+    let res: Result<()> = parsed_documents.iter_mut().try_for_each(|pd| {
+        let path = pd.get_file_path().context("No file path found!")?;
+        let file_info = Some(FileInfo::new(path.to_path_buf(), None, None));
+        let old_text = pd.to_zk_text(&file_info);
+        let old_pd = pd.clone();
+        if let Some(DocumentComponent::Frontmatter(properties)) =
+            pd.get_document_component_mut(&|comp| {
+                matches!(comp, DocumentComponent::Frontmatter(props) if props.iter().any(|p|
+                {
+                        p.prop_type == PropType::CompactList && p.name == "tags"
+
+
+                    }
+                ))
+            })
+        {
+            properties.iter_mut().for_each(|p| {
+                if p.name == "tags" && p.prop_type == PropType::CompactList {
+                    p.prop_type = PropType::List;
+                }
+            });
+        };
+        let new_text = pd.to_string(mode, &file_info);
+        if old_text != new_text {
+            if fix {
+                let mut state = OverwriteConfirmState::new(
+                    old_text,
+                    new_text.clone(),
+                    format!("Should the file {:?} be overwritten?", path),
+                );
+                ratatui::run(|terminal| state.run(terminal))?;
+                if state.choice {
+                    std::fs::write(path, new_text)?;
+                } else {
+                    *pd = old_pd;
+                }
+            } else {
+                println!(
+                    "\nFile {path:?} contains a compressed list in its frontmatter:\n{old_text}"
+                );
+            }
+        }
+        Ok(())
     });
+    res
+}
+
+struct OverwriteConfirmState {
+    old: String,
+    new: String,
+    info: String,
+    choice: bool,
+    exit: bool,
+}
+
+impl OverwriteConfirmState {
+    fn new(old: String, new: String, info: String) -> Self {
+        Self {
+            old,
+            new,
+            info,
+            choice: false,
+            exit: false,
+        }
+    }
+    fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+
+    fn handle_events(&mut self) -> Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event);
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('y') => {
+                self.choice = true;
+                self.exit = true;
+            }
+            KeyCode::Char('n') => {
+                self.choice = false;
+                self.exit = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Widget for &OverwriteConfirmState {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let row_constrains = vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(3),
+        ];
+        let vertical = Layout::vertical(row_constrains);
+        let rows = vertical.split(area);
+
+        // info (top)
+        Paragraph::new(self.info.clone()).render(rows[0], buf);
+
+        // old/new
+        let col_constraints = vec![Constraint::Percentage(50), Constraint::Percentage(50)];
+        let horizontal = Layout::horizontal(col_constraints);
+        let cols = horizontal.split(rows[1]);
+        Paragraph::new(self.old.clone())
+            .block(Block::default().title_top("old").borders(Borders::ALL))
+            .render(cols[0], buf);
+        Paragraph::new(self.new.clone())
+            .block(Block::default().title_top("new").borders(Borders::ALL))
+            .render(cols[1], buf);
+
+        // instructions
+        Paragraph::new(" <y> overwrite | <n> keep old ")
+            .block(Block::default().borders(Borders::ALL))
+            .render(rows[2], buf);
+    }
 }
