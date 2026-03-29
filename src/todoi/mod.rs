@@ -229,9 +229,10 @@ impl TaskData {
 }
 
 fn handle_youtube_task(task: &TodoistTask, config: &Config) -> TaskData {
-    let yt_video_url_re =
-        Regex::new(r"(https://)(?:www\.)?(?:youtu.be|youtube\.com)/(shorts/)?[A-Za-z0-9?=\-_&]*")
-            .unwrap();
+    let yt_video_url_re = Regex::new(
+        r"(https://|m\.)(?:www\.)?(?:youtu.be|youtube\.com)/(shorts/)?[A-Za-z0-9?=\-_&]*",
+    )
+    .unwrap();
     if let Some(m) = yt_video_url_re.captures(&task.content)
         && let Some(video_url) = m.get(0)
     {
