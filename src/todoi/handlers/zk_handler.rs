@@ -286,13 +286,7 @@ impl ZkHandler {
     }
 
     pub fn get_creators_file(&self) -> Result<PathBuf> {
-        let base_dirs = directories::BaseDirs::new().context("Failed to create base dirs")?;
-        let data_dir = base_dirs.data_dir().join("pkmt");
-        if !data_dir.exists() {
-            std::fs::create_dir(&data_dir).context("Could not create {data_dir:?}")?;
-        }
-
-        let lookup_path = data_dir.join("creator_lookup.toml");
+        let lookup_path = self.root_dir.join(".zk").join("creater_lookup.toml");
         Ok(lookup_path)
     }
 
