@@ -526,11 +526,21 @@ impl Property {
         let value = vals.join(", ");
         match self.prop_type {
             PropType::CompactList => format!("{}: [{value}]", self.name),
-            PropType::Single => format!("{}: {value}", self.name),
+            PropType::Single => {
+                if value.is_empty() {
+                    format!("{}:", self.name)
+                } else {
+                    format!("{}: {value}", self.name)
+                }
+            }
             PropType::List => {
                 let value: Vec<String> = vals.iter().map(|v| format!("    - {v}")).collect();
                 let value = value.join("\n");
-                format!("{}:\n{value}", self.name)
+                if value.is_empty() {
+                    format!("{}:", self.name)
+                } else {
+                    format!("{}:\n{value}", self.name)
+                }
             }
         }
     }
@@ -1384,4 +1394,15 @@ fn test_almost_empty_pd_to_logseq() {
     )]);
     let expected = "-";
     assert_eq!(pd.to_logseq_text(&None), expected);
+}
+
+#[test]
+fn test_empty_md_list_frontmatter() {
+    let pd = ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![Property::new(
+        "name".to_string(),
+        PropType::List,
+        vec![],
+    )])]);
+    let expected = "---\nname:\n---";
+    assert_eq!(pd.to_zk_text(&None), expected);
 }

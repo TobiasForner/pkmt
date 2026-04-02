@@ -7,9 +7,12 @@ use std::{
 use test_log::test;
 
 use crate::{
-    document_component::{ListElem, PropType, PropValue, Property},
-    parsing::md_parsing::{ListElement, MdComponent, parse_md_text},
-    util::{apply_substitutions, file_link_pattern, link_name_pattern},
+    document_component::{ListElem, PropType, Property},
+    parsing::{
+        TextMode,
+        md_parsing::{ListElement, MdComponent, parse_md_text},
+    },
+    util::{apply_substitutions, file_link_pattern, indent_spaces, link_name_pattern},
 };
 use anyhow::{Context, Result, bail};
 use tracing::{debug, instrument};
@@ -494,23 +497,31 @@ fn parse_frontmatter(
                         if value.trim().is_empty() {
                             // check for md list
                             let mut list_values = vec![];
+                            let parent_indent = indent_spaces(line);
                             while pos + 1 < text_lines.len()
+                                && indent_spaces(text_lines[pos + 1]) > parent_indent
                                 && text_lines[pos + 1].trim().starts_with("- ")
                             {
                                 let next_value = text_lines[pos + 1].trim()[2..].trim();
                                 list_values.push(next_value.to_string());
                                 pos += 1;
                             }
-                            // if we didnt find
+                            // we didnt find any indented list properties, so we simply treat this
+                            // as a single-style property
                             if list_values.is_empty() {
                                 pos += 1;
-                                props.push(Property::new(key.to_string(), PropType::List, vec![]));
-                            } else {
-                                // TODO: make sure that these values are parsed properly
                                 props.push(Property::new(
                                     key.to_string(),
+                                    PropType::Single,
+                                    vec![],
+                                ));
+                            } else {
+                                props.push(Property::new_parse(
+                                    key.to_string(),
                                     PropType::List,
-                                    list_values.into_iter().map(PropValue::String).collect(),
+                                    &list_values,
+                                    TextMode::Zk,
+                                    file_dir,
                                 ));
                             }
                             continue;
@@ -1083,6 +1094,7 @@ fn test_link_with_special() {
 
 #[test]
 fn test_frontmatter_with_md_list() {
+    use crate::document_component::PropValue;
     let text = "---\nprop: val\ntags:\n    - a\n    - b\n---";
     let res = parse_zk_text(text, &None).unwrap();
     let expected = ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![
@@ -1108,5 +1120,34 @@ fn test_frontmatter_with_md_list() {
 fn parse_frontmatter_with_empty_line_property() {
     let text = "---\nprop:\n\n---";
     let res = parse_zk_text(text, &None).unwrap();
-    assert_eq!(res.to_zk_text(&None), text)
+    let expected =
+        ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![Property::new(
+            "prop".to_string(),
+            PropType::Single,
+            vec![],
+        )])]);
+    assert_eq!(res, expected);
+    assert_eq!(res.to_zk_text(&None), "---\nprop:\n---")
+}
+
+#[test]
+fn parse_frontmatter_md_list_mention() {
+    use crate::document_component::PropValue;
+    let text = "---\nprop:\n  - [mention](path/to/file.md)\n---";
+    let res = parse_zk_text(text, &None).unwrap();
+    let expected =
+        ParsedDocument::ParsedText(vec![DocumentComponent::Frontmatter(vec![Property::new(
+            "prop".to_string(),
+            PropType::List,
+            vec![PropValue::FileLink(
+                MentionedFile::FileName("path/to/file.md".to_string()),
+                None,
+                Some("mention".to_string()),
+            )],
+        )])]);
+    assert_eq!(res, expected);
+    assert_eq!(
+        res.to_zk_text(&None),
+        "---\nprop:\n    - [mention](path/to/file.md)\n---"
+    )
 }
