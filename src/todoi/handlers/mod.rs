@@ -2,7 +2,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 use crate::{
     document_component::{DocumentComponent, PropValue},
-    parsing::{TextMode, parse_all_files_in_dir},
+    parsing::{TextMode, parse_all_files_in_dir_iter},
     todoi::{
         TaskData,
         config::Config,
@@ -38,12 +38,8 @@ pub fn handle_tasks(
         _ => todo!(),
     };
     let mut url_cache = UrlCache::load_or_new();
-    if url_cache.urls.is_empty()
-        && let Ok(urls) = get_all_urls(root_dir, mode)
-    {
-        urls.iter().for_each(|url| {
-            let _ = url_cache.urls.insert(url.to_string());
-        });
+    if url_cache.urls.is_empty() {
+        url_cache.reload_urls(&mode, root_dir)?;
     }
     let deduped_tasks: Vec<TodoistTask> = tasks
         .iter()
@@ -81,44 +77,39 @@ pub fn handle_tasks(
     Ok(tasks)
 }
 
-fn get_all_urls(root_dir: &PathBuf, mode: TextMode) -> Result<Vec<String>> {
-    let parsed_documents = parse_all_files_in_dir(root_dir, &mode)?;
-    let prop_dcs: Vec<DocumentComponent> = parsed_documents
-        .iter()
-        .flat_map(|pd| {
-            pd.get_all_document_components(&|dc: &DocumentComponent| {
-                if let DocumentComponent::Properties(props) = dc {
-                    props.iter().any(|p| p.has_name("url"))
-                } else {
-                    false
-                }
-            })
-            .into_iter()
-        })
-        .collect();
-    let tmp: Vec<String> = prop_dcs
-        .iter()
-        .filter_map(|dc| {
-            if let DocumentComponent::Properties(props) = dc {
-                let tmp = props.iter().filter(|p| p.has_name("url")).flat_map(|p| {
-                    p.values.iter().filter_map(|v| match v {
-                        PropValue::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                });
-                Some(tmp)
-            } else {
-                None
-            }
-        })
-        .flatten()
-        .collect();
-    Ok(tmp)
-}
-
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct UrlCache {
     urls: HashSet<String>,
+}
+
+impl UrlCache {
+    fn reload_urls(&mut self, mode: &TextMode, root_dir: &PathBuf) -> Result<()> {
+        parse_all_files_in_dir_iter(root_dir, mode)?
+            .filter_map(|pd| pd.ok())
+            .flat_map(|pd| {
+                println!("{:?}", pd.get_file_path());
+                pd.get_all_document_components(&|dc: &DocumentComponent| {
+                    if let DocumentComponent::Properties(props) = dc {
+                        props.iter().any(|p| p.has_name("url"))
+                    } else {
+                        false
+                    }
+                })
+                .into_iter()
+            })
+            .for_each(|dc| {
+                if let DocumentComponent::Properties(props) = dc {
+                    props.iter().filter(|p| p.has_name("url")).for_each(|p| {
+                        p.values.iter().for_each(|v| {
+                            if let PropValue::String(s) = v {
+                                self.urls.insert(s.clone());
+                            }
+                        })
+                    });
+                }
+            });
+        Ok(())
+    }
 }
 
 impl FileLocation for UrlCache {

@@ -57,6 +57,17 @@ pub fn parse_file(file: &PathBuf, mode: &TextMode) -> Result<ParsedDocument> {
     }
 }
 
+pub fn parse_all_files_in_dir_iter(
+    root_dir: &PathBuf,
+    mode: &TextMode,
+) -> Result<impl Iterator<Item = Result<ParsedDocument>>> {
+    let files = files_in_tree(root_dir, &Some(vec!["md"]))?;
+    Ok(files.into_iter().map(|f| {
+        println!("Parsing {f:?}");
+        parse_file(&f, mode)
+    }))
+}
+
 /// recursively parses all files in the given directory
 pub fn parse_all_files_in_dir(root_dir: &PathBuf, mode: &TextMode) -> Result<Vec<ParsedDocument>> {
     let files = files_in_tree(root_dir, &Some(vec!["md"]))?;
