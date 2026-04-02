@@ -141,27 +141,7 @@ fn get_task_data_full(
         .for_each(|(todo_index, (_, td))| {
             res.push((td, tasks_todo[todo_index].clone()));
         });
-    //todo!()
     res
-
-    // tasks
-    //     .into_iter()
-    //     .map(|(td, task)| match td {
-    //         TaskData::Unhandled => {
-    //             if !cancelled {
-    //                 let (res, td) = get_interactive_data(&task, template_names, config);
-    //                 println!("interactive resolution for {task:?}: {res:?} with {td:?}");
-    //                 if let Resolution::Cancel = res {
-    //                     cancelled = true;
-    //                 }
-    //                 (td, task)
-    //             } else {
-    //                 (td, task)
-    //             }
-    //         }
-    //         _ => (td, task),
-    //     })
-    //     .collect()
 }
 
 #[derive(Debug)]
