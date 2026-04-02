@@ -14,7 +14,7 @@ impl Keys {
     fn keys_file() -> Result<PathBuf> {
         let dirs = directories::ProjectDirs::from("TF", "TF", "pkmt")
             .context("Failed to construct config path!")?;
-        let keys_file = dirs.config_local_dir().join("keys.txt");
+        let keys_file = dirs.config_local_dir().join("keys.toml");
         Ok(keys_file)
     }
     pub fn parse() -> Result<Self> {
