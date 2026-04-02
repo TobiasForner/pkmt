@@ -25,6 +25,8 @@ Contents:
 yt_api_key = "..."
 todoist_api_key = "..."
 ```
+The `yt_api_key` can be retrieved from the Google developers console.
+The todoist API key can be retrieved from the todoist settings under Integrations -> Developer.
 
 ## Development
 This project uses [prek](https://github.com/j178/prek) for git hooks.
