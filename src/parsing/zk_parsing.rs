@@ -501,11 +501,18 @@ fn parse_frontmatter(
                                 list_values.push(next_value.to_string());
                                 pos += 1;
                             }
-                            props.push(Property::new(
-                                key.to_string(),
-                                PropType::List,
-                                list_values.into_iter().map(PropValue::String).collect(),
-                            ));
+                            // if we didnt find
+                            if list_values.is_empty() {
+                                pos += 1;
+                                props.push(Property::new(key.to_string(), PropType::List, vec![]));
+                            } else {
+                                // TODO: make sure that these values are parsed properly
+                                props.push(Property::new(
+                                    key.to_string(),
+                                    PropType::List,
+                                    list_values.into_iter().map(PropValue::String).collect(),
+                                ));
+                            }
                             continue;
                         }
                         let name = key.trim();
@@ -1095,4 +1102,11 @@ fn test_frontmatter_with_md_list() {
     ])]);
     assert_eq!(res, expected);
     assert_eq!(res.to_zk_text(&None), text);
+}
+
+#[test]
+fn parse_frontmatter_with_empty_line_property() {
+    let text = "---\nprop:\n\n---";
+    let res = parse_zk_text(text, &None).unwrap();
+    assert_eq!(res.to_zk_text(&None), text)
 }
