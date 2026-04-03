@@ -26,7 +26,8 @@ impl ZkHandler {
         use std::process::Command;
         debug!("trying to get zk file for {title}");
 
-        let title = title.replace('"', "");
+        let title = ZkHandler::normalize_title(title);
+
         let root_dir = self.root_dir.to_str().context(format!(
             "Failed to convert zk root directory to string: {:?}",
             self.root_dir
@@ -285,6 +286,10 @@ impl ZkHandler {
         }
     }
 
+    fn normalize_title(title: &str) -> String {
+        title.replace("|", "-")
+    }
+
     pub fn delete_creator_file_entry(&self, name: &str) -> Result<()> {
         let mut creators_lookup = self.load_creators_lookup()?;
         creators_lookup
@@ -350,6 +355,7 @@ impl TaskDataHandler for ZkHandler {
             debug!("no title!");
             return Ok(false);
         };
+        let title = ZkHandler::normalize_title(&title);
         let template_file = match task_data {
             TaskData::Youtube(_url, _, _channel, _tags) => {
                 self.root_dir.join(".zk/templates/yt_video.md")
