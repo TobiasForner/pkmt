@@ -27,11 +27,43 @@ impl ZkHandler {
         debug!("trying to get zk file for {title}");
 
         let title = title.replace('"', "");
-
         let root_dir = self.root_dir.to_str().context(format!(
             "Failed to convert zk root directory to string: {:?}",
             self.root_dir
         ))?;
+
+        let zk_list_args = [
+            "list",
+            "--no-input",
+            "-m",
+            &title,
+            "-f",
+            "{{title}}||||{{path}}",
+            "-q",
+            root_dir,
+        ];
+
+        let output = Command::new("zk")
+            .args(zk_list_args)
+            .output()
+            .context(format!("failed to retrieve zk files for {title}"))?;
+        if !output.status.success() {
+            println!(
+                "Failed to list zk files for title {title:?}! command: {zk_list_args:?}; {}; {}",
+                str::from_utf8(&output.stdout).unwrap(),
+                str::from_utf8(&output.stderr).unwrap()
+            );
+            bail!("Could not list zk files for {title:?}");
+        }
+
+        let found = str::from_utf8(&output.stdout)?
+            .lines()
+            .filter_map(|l| l.split_once("||||"))
+            .find(|(found_title, _)| title == *found_title);
+        if let Some((_, path_end)) = found {
+            return Ok(self.root_dir.join(path_end));
+        }
+
         let zk_args = [
             "new",
             "--no-input",
