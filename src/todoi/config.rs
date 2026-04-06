@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Keys {
     pub yt_api_key: String,
     pub todoist_api_key: String,
@@ -19,10 +19,32 @@ impl Keys {
     }
     pub fn parse() -> Result<Self> {
         let keys_file = Keys::keys_file()?;
-        let text = std::fs::read_to_string(&keys_file)
-            .context(format!("Could not read keys from {keys_file:?}"))?
-            .replace("\r\n", "\n");
-        toml::from_str(&text).context("Could not parse keys")
+        let text = std::fs::read_to_string(&keys_file);
+
+        if let Ok(text) = text {
+            let text = text.replace("\r\n", "\n");
+            let keys: Keys = toml::from_str(&text).context("Could not parse keys")?;
+            if keys.yt_api_key.is_empty() || keys.todoist_api_key.is_empty() {
+                bail!(
+                    "At least one of the keys in {keys_file:?} is empty. Please fill in the missing API keys."
+                )
+            }
+            Ok(keys)
+        } else {
+            let empty = Keys::empty();
+            let empty_text = toml::to_string(&empty)?;
+            std::fs::write(&keys_file, empty_text)?;
+            bail!(
+                "Failed to read keys file at {keys_file:?}. Created a stub file. Please fill in the missing API keys."
+            )
+        }
+    }
+
+    fn empty() -> Self {
+        Keys {
+            yt_api_key: String::new(),
+            todoist_api_key: String::new(),
+        }
     }
 }
 
