@@ -2,9 +2,12 @@ use anyhow::{Context, Result, bail};
 use edit_distance::edit_distance;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+//use ratatui::crossterm::style::Stylize;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::text::Line;
 use ratatui::{DefaultTerminal, Frame};
+use ratatui::{prelude::*, widgets::*};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::result::Result::Ok;
@@ -169,11 +172,13 @@ fn similar_file_names(
     // clustering[a] = b means that the ath file_name is part of the same cluster as the bth file name
     let mut clustering: Vec<usize> = (0..file_names.len()).collect();
     println!("Building initial clustering");
+    let ignore_similar = IgnoredSimilarFiles::read();
     (0..file_names.len().saturating_sub(1)).for_each(|a| {
-        let (_, first, _, _) = &file_names[a];
+        let (_, first, a_path, _) = &file_names[a];
         ((a + 1)..file_names.len()).for_each(|b| {
-            let (_, second, _, _) = &file_names[b];
-            if edit_distance(first, second) <= threshold {
+            let (_, second, b_path, _) = &file_names[b];
+            if edit_distance(first, second) <= threshold && !ignore_similar.contains(a_path, b_path)
+            {
                 clustering[a] = b;
             }
         })
@@ -252,13 +257,72 @@ fn resolve_duplicates_in_cluster(
                 let file = pd.get_file_path().unwrap();
                 extract_date(&properties).map(|date| (index, file, pd, date))
             } else {
-                println!("did not find date!");
+                println!("did not find date for {:?}", pd.get_file_path());
                 None
             }
         })
         .collect();
     date_annotated.sort_by(|(_, _, _, date1), (_, _, _, date2)| date1.cmp(date2));
-    println!("###############");
+    let file_paths: Vec<(PathBuf, SimilarNameResolution)> = date_annotated
+        .iter()
+        .enumerate()
+        .map(|(index, (_, pb, _, _))| {
+            (
+                pb.to_path_buf(),
+                if index == 0 {
+                    SimilarNameResolution::Main
+                } else {
+                    SimilarNameResolution::Skip
+                },
+            )
+        })
+        .collect();
+    let mut similar_names_state = SimilarNamesState::new(file_paths);
+    ratatui::run(|terminal| similar_names_state.run(terminal)).unwrap();
+    let main = similar_names_state.file_paths.iter().find_map(|(fp, res)| {
+        if *res == SimilarNameResolution::Main {
+            Some(fp)
+        } else {
+            None
+        }
+    });
+    let mut ignore_similar = IgnoredSimilarFiles::read();
+    let mut path_index_to_delete = vec![];
+    let to_del: Vec<PathBuf> = similar_names_state
+        .file_paths
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (fp, res))| {
+            if *res == SimilarNameResolution::Remove {
+                path_index_to_delete.push((fp.clone(), date_annotated[index].0));
+
+                Some(fp.to_path_buf())
+            } else if *res == SimilarNameResolution::Ignore {
+                ignore_similar.ensure_contains(main.unwrap(), fp);
+                None
+            } else {
+                None
+            }
+        })
+        .collect();
+    redirect_file_mentions(parsed_documents, &to_del, main.unwrap())?;
+    let mut pd_indices_to_delete = vec![];
+    let success = path_index_to_delete
+        .iter()
+        .try_for_each(|(to_remove, pd_index)| {
+            let is_deleted = std::fs::remove_file(to_remove);
+            if is_deleted.is_ok() {
+                pd_indices_to_delete.push(*pd_index);
+            }
+            is_deleted
+        });
+    if success.is_ok() {
+        Ok(pd_indices_to_delete)
+    } else {
+        bail!("Failed to delete duplicate files: {success:?}")
+    }
+
+    /*println!("###############");
     println!("The following files have very similar names:");
 
     date_annotated.iter().for_each(|(_, path, pd, date)| {
@@ -312,7 +376,7 @@ fn resolve_duplicates_in_cluster(
     } else {
         println!("error: {res:?}");
     }
-    Ok(pd_indices_to_delete)
+    Ok(pd_indices_to_delete)*/
 }
 
 fn redirect_file_mentions(
@@ -340,7 +404,7 @@ fn redirect_file_mentions(
         });
 
         if !to_change.is_empty() {
-            println!("======= old =======\n{old_text}");
+            //println!("======= old =======\n{old_text}");
             to_change.into_iter().for_each(|comp| match comp {
                 DCFL(MentionedFile::FilePath(p), _section, _rename) => {
                     *p = to.to_path_buf();
@@ -359,10 +423,21 @@ fn redirect_file_mentions(
                 _ => {}
             });
             let new_text = pd.to_zk_text(&file_info);
-            println!("====== new ====== ({path:?})\n{new_text}\n============\n\n");
+            let mut redirect_state = OverwriteConfirmState::new(
+                old_text,
+                new_text.clone(),
+                "This is the result of the substitution:".to_string(),
+            );
+            ratatui::run(|terminal| redirect_state.run(terminal)).unwrap();
+            if redirect_state.choice {
+                let _ = std::fs::write(&path, new_text).context("Failed to write to file {p:?}");
+            } else {
+                all_overwritten = false;
+            }
+            /*println!("====== new ====== ({path:?})\n{new_text}\n============\n\n");
             let choices = vec!["y".to_string(), "n".to_string()];
             let answer =
-                get_user_input_choices("Do you want do overwrite the old file? [y/n/s]", choices);
+              get_user_input_choices("Do you want do overwrite the old file? [y/n/s]", choices);
             match &answer {
                 Some(val) if val == "y" => {
                     let _ =
@@ -371,7 +446,7 @@ fn redirect_file_mentions(
                 _ => {
                     all_overwritten = false;
                 }
-            }
+            }*/
         }
     });
 
@@ -534,8 +609,6 @@ fn contracted_frontmatter_lists(
                 matches!(comp, DocumentComponent::Frontmatter(props) if props.iter().any(|p|
                 {
                         p.prop_type == PropType::CompactList && p.name == "tags"
-
-
                     }
                 ))
             })
@@ -654,5 +727,220 @@ impl Widget for &OverwriteConfirmState {
         Paragraph::new(" <y> overwrite | <n> keep old ")
             .block(Block::default().borders(Borders::ALL))
             .render(rows[2], buf);
+    }
+}
+
+#[derive(Eq, PartialEq)]
+enum SimilarNameResolution {
+    Main,
+    None,
+    Ignore,
+    Remove,
+    Skip,
+}
+
+struct SimilarNamesState {
+    file_paths: Vec<(PathBuf, SimilarNameResolution)>,
+    position: usize,
+    exit: bool,
+}
+
+impl SimilarNamesState {
+    fn new(file_paths: Vec<(PathBuf, SimilarNameResolution)>) -> Self {
+        let len = file_paths.len();
+        Self {
+            file_paths,
+            position: 1.min(len.saturating_sub(1)),
+            exit: false,
+        }
+    }
+    fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+
+    fn handle_events(&mut self) -> Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event);
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn change_resolution_for_current_position(&mut self, resolution: SimilarNameResolution) {
+        self.change_resolution_for_position(resolution, self.position);
+    }
+
+    fn change_resolution_for_position(
+        &mut self,
+        resolution: SimilarNameResolution,
+        position: usize,
+    ) {
+        if self.file_paths[position].1 != SimilarNameResolution::Main {
+            let new_res = (self.file_paths[self.position].0.clone(), resolution);
+            self.file_paths[position] = new_res;
+        }
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        use SimilarNameResolution::*;
+        match key_event.code {
+            KeyCode::Char('s') => {
+                self.change_resolution_for_current_position(Skip);
+            }
+            KeyCode::Char('i') => {
+                self.change_resolution_for_current_position(Ignore);
+            }
+            KeyCode::Char('d') => {
+                self.change_resolution_for_current_position(Remove);
+            }
+            KeyCode::Char('m') => {
+                let main_pos = self
+                    .file_paths
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (_, r))| matches!(*r, Main))
+                    .unwrap()
+                    .0;
+                self.change_resolution_for_position(None, main_pos);
+                self.change_resolution_for_current_position(Main);
+            }
+            KeyCode::Char('q') => {
+                self.exit = true;
+            }
+            KeyCode::Up => {
+                self.position = self.position.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                self.position = self
+                    .position
+                    .saturating_add(1)
+                    .min(self.file_paths.len().saturating_sub(1));
+            }
+            _ => {}
+        };
+    }
+}
+
+impl Widget for &SimilarNamesState {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let row_constrains = vec![
+            Constraint::Length(1),
+            Constraint::Length(self.file_paths.len() as u16),
+            Constraint::Min(10),
+            Constraint::Length(3),
+        ];
+        let vertical = Layout::vertical(row_constrains);
+        let rows = vertical.split(area);
+
+        // info (top): row 0
+        Paragraph::new("The following files have very similar file names:").render(rows[0], buf);
+
+        // file path selection: row 1
+        let lines: Vec<Line> = self
+            .file_paths
+            .iter()
+            .enumerate()
+            .map(|(i, (p, r))| {
+                let resolution_text = match r {
+                    SimilarNameResolution::Main => "<main>",
+                    SimilarNameResolution::None => "",
+                    SimilarNameResolution::Ignore => "<ignore>",
+                    SimilarNameResolution::Remove => "<remove>",
+                    SimilarNameResolution::Skip => "<skip>",
+                };
+                if i == self.position {
+                    Line::from(vec![
+                        resolution_text.yellow(),
+                        " ".into(),
+                        p.to_str().unwrap().bold().blue(),
+                    ])
+                } else {
+                    Line::from(vec![
+                        resolution_text.yellow(),
+                        " ".into(),
+                        p.to_str().unwrap().into(),
+                    ])
+                }
+            })
+            .collect();
+        Paragraph::new(lines).render(rows[1], buf);
+
+        // file preview: row 2
+        let col_constraints = vec![Constraint::Percentage(50), Constraint::Percentage(50)];
+        let horizontal = Layout::horizontal(col_constraints);
+        let cols = horizontal.split(rows[2]);
+        let main_text = std::fs::read_to_string(&self.file_paths[0].0).unwrap();
+        let pos_text = std::fs::read_to_string(&self.file_paths[self.position].0).unwrap();
+        Paragraph::new(main_text)
+            .block(
+                Block::default()
+                    .title_top(format!("main ({:?})", self.file_paths[0].0))
+                    .borders(Borders::ALL),
+            )
+            .render(cols[0], buf);
+        Paragraph::new(pos_text)
+            .block(
+                Block::default()
+                    .title_top(self.file_paths[self.position].0.to_str().unwrap())
+                    .borders(Borders::ALL),
+            )
+            .render(cols[1], buf);
+
+        // instructions
+        Paragraph::new(" <s> skip | <i> ignore | <d> delete | <m> make main | <q> quit ")
+            .block(Block::default().borders(Borders::ALL))
+            .render(rows[3], buf);
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+struct IgnoredSimilarFiles {
+    ignore_similar: Vec<(PathBuf, PathBuf)>,
+}
+
+impl IgnoredSimilarFiles {
+    fn read() -> Self {
+        let text = std::fs::read_to_string(IgnoredSimilarFiles::get_file_path()).context("");
+        if let Ok(text) = text {
+            toml::from_str(&text)
+                .context("failed to parse toml!")
+                .unwrap()
+        } else {
+            println!("failed to read");
+            IgnoredSimilarFiles::default()
+        }
+    }
+
+    fn write(&self) -> Result<()> {
+        std::fs::write(IgnoredSimilarFiles::get_file_path(), toml::to_string(self)?)
+            .context("Failed to write ignore similar toml")
+    }
+
+    fn get_file_path() -> PathBuf {
+        let dirs = directories::ProjectDirs::from("TF", "TF", "pkmt").unwrap();
+        dirs.config_local_dir().join("ignore_similar.toml")
+    }
+
+    fn contains(&self, a: &PathBuf, b: &PathBuf) -> bool {
+        self.ignore_similar
+            .iter()
+            .any(|(x, y)| x == a && y == b || x == b && y == a)
+    }
+
+    fn ensure_contains(&mut self, a: &PathBuf, b: &PathBuf) {
+        if !self.contains(a, b) {
+            self.ignore_similar.push((a.clone(), b.clone()));
+            self.write().unwrap();
+        }
     }
 }
