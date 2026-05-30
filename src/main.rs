@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use todoi::handlers::zk_handler::set_zk_creator_file;
 use tracing::Level;
 use tracing_subscriber::{
     EnvFilter,
@@ -19,7 +18,7 @@ use std::{collections::HashSet, path::PathBuf};
 use crate::{
     convert::{convert_file, convert_tree},
     doctor::doctor,
-    todoi::{config::Tags, handlers::zk_handler::ZkHandler},
+    todoi::config::Tags,
 };
 mod document_component;
 use crate::convert::FileInfo;
@@ -93,17 +92,6 @@ enum Commands {
         #[clap(subcommand)]
         tcfg_command: TCfgCommand,
     },
-    /// todoi creator manipulation
-    Creator {
-        #[arg(required = true)]
-        root_dir: PathBuf,
-        #[arg(required = true)]
-        name: String,
-        #[arg(short, long, required = false)]
-        mode: Option<TextMode>,
-        #[clap(subcommand)]
-        creator_command: CreatorCommand,
-    },
     Doctor {
         #[arg(required = false)]
         root_dir: Option<PathBuf>,
@@ -145,26 +133,6 @@ enum TCfgCommand {
         url: String,
         #[clap(required = true)]
         sources: Vec<String>,
-    },
-}
-
-#[derive(Clone, Subcommand)]
-enum CreatorCommand {
-    /// delete creator file
-    Delete,
-    /// Overwrite creator file
-    Overwrite {
-        #[arg(required = true)]
-        new_file: PathBuf,
-    },
-    /// shows the creator path for the given name. If relative is passed the output path is
-    /// relative to that path
-    ShowFile {
-        #[arg(short, long)]
-        relative: Option<PathBuf>,
-
-        #[arg(short, long, default_value_t = false)]
-        create_missing: bool,
     },
 }
 
@@ -338,48 +306,6 @@ fn run() -> Result<()> {
                 })?;
             }
             Ok(())
-        }
-        Some(Commands::Creator {
-            root_dir,
-            name,
-            mode,
-            creator_command,
-        }) => {
-            let mode = mode.unwrap_or(TextMode::Zk);
-            match mode {
-                TextMode::Zk => {
-                    match creator_command {
-                        CreatorCommand::Delete => {
-                            let handler = ZkHandler::new(root_dir);
-                            let _ = handler.delete_creator_file_entry(&name);
-                        }
-                        CreatorCommand::Overwrite { new_file } => {
-                            set_zk_creator_file(&name, &new_file, &root_dir)?;
-                        }
-                        CreatorCommand::ShowFile {
-                            relative,
-                            create_missing,
-                        } => {
-                            let handler = ZkHandler::new(root_dir);
-                            if let Ok(mut creator_file) =
-                                handler.get_file_for_creator(&name, create_missing)
-                            {
-                                if let Some(relative) = relative
-                                    && let Some(rel) = relative.parent()
-                                    && let Some(rel) = pathdiff::diff_paths(&creator_file, rel)
-                                {
-                                    creator_file = rel.to_path_buf();
-                                }
-                                println!("{}", creator_file.to_string_lossy());
-                            } else {
-                                println!("Could not find a creator file for '{name}'");
-                            }
-                        }
-                    }
-                    Ok(())
-                }
-                _ => todo!("to implement: retrieve creator file for {mode:?}"),
-            }
         }
         None => panic!("Failed to parse arguments!"),
     };

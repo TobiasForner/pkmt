@@ -1,5 +1,4 @@
-use std::path::Path;
-use std::{collections::HashMap, fmt::Debug, fs::DirEntry, path::PathBuf, str::FromStr, vec};
+use std::{fmt::Debug, fs::DirEntry, path::PathBuf, str::FromStr, vec};
 
 use anyhow::{Context, Result, bail};
 use tracing::{debug, info, instrument};
@@ -22,7 +21,12 @@ impl ZkHandler {
     }
 
     #[instrument]
-    fn get_zk_file(&self, title: &str, template_path: PathBuf) -> Result<PathBuf> {
+    fn get_zk_file(
+        &self,
+        title: &str,
+        template_path: PathBuf,
+        create_missing: bool,
+    ) -> Result<PathBuf> {
         use std::process::Command;
         debug!("trying to get zk file for {title}");
 
@@ -65,41 +69,45 @@ impl ZkHandler {
             return Ok(self.root_dir.join(path_end));
         }
 
-        let zk_args = [
-            "new",
-            "--no-input",
-            "--title",
-            &title,
-            "--template",
-            template_path.to_str().context(format!(
-                "Failed to convert zk template path to string: {:?}",
-                self.root_dir
-            ))?,
-            "--notebook-dir",
-            self.root_dir.to_str().context(format!(
-                "Failed to convert zk root directory to string: {:?}",
-                self.root_dir
-            ))?,
-            "--notebook-dir",
-            root_dir,
-            "--working-dir",
-            root_dir,
-            "-p",
-        ];
-        let output = Command::new("zk")
-            .args(zk_args)
-            .output()
-            .context(format!("failed to retrieve zk file for {title}"))?;
-        if !output.status.success() {
-            println!(
-                "Failed to create zk file for title {title:?}! command: {zk_args:?}; {}; {}",
-                str::from_utf8(&output.stdout).unwrap(),
-                str::from_utf8(&output.stderr).unwrap()
-            );
-            bail!("Could not create zk file for {title:?}");
+        if create_missing {
+            let zk_args = [
+                "new",
+                "--no-input",
+                "--title",
+                &title,
+                "--template",
+                template_path.to_str().context(format!(
+                    "Failed to convert zk template path to string: {:?}",
+                    self.root_dir
+                ))?,
+                "--notebook-dir",
+                self.root_dir.to_str().context(format!(
+                    "Failed to convert zk root directory to string: {:?}",
+                    self.root_dir
+                ))?,
+                "--notebook-dir",
+                root_dir,
+                "--working-dir",
+                root_dir,
+                "-p",
+            ];
+            let output = Command::new("zk")
+                .args(zk_args)
+                .output()
+                .context(format!("failed to retrieve zk file for {title}"))?;
+            if !output.status.success() {
+                println!(
+                    "Failed to create zk file for title {title:?}! command: {zk_args:?}; {}; {}",
+                    str::from_utf8(&output.stdout).unwrap(),
+                    str::from_utf8(&output.stderr).unwrap()
+                );
+                bail!("Could not create zk file for {title:?}");
+            }
+            let p = std::str::from_utf8(&output.stdout)?;
+            Ok(PathBuf::from_str(p.trim())?)
+        } else {
+            bail!("Did not find zk file.")
         }
-        let p = std::str::from_utf8(&output.stdout)?;
-        Ok(PathBuf::from_str(p.trim())?)
     }
 
     #[instrument]
@@ -290,60 +298,13 @@ impl ZkHandler {
         title.replace("|", "-")
     }
 
-    pub fn delete_creator_file_entry(&self, name: &str) -> Result<()> {
-        let mut creators_lookup = self.load_creators_lookup()?;
-        creators_lookup
-            .remove_entry(name)
-            .context(format!("Failed to delete entry for '{name}'."))?;
-        self.store_creators_lookup(&creators_lookup)?;
-        println!("Successfully deleted the entry for '{name}'.");
-        Ok(())
-    }
-
     pub fn get_file_for_creator(&self, name: &str, create_missing: bool) -> Result<PathBuf> {
-        let mut lookup: HashMap<String, PathBuf> = self.load_creators_lookup()?;
-        if let Some(path) = lookup.get(name) {
-            debug!("{name:?}: found creator file in lookup: {path:?}");
-            Ok(path.to_path_buf())
-        } else {
-            if !create_missing {
-                bail!("Could not find creator file for '{name}'.")
-            }
-            let template_file = self
-                .root_dir
-                .join(".zk")
-                .join("templates")
-                .join("creator.md");
-            let file = self.get_zk_file(name, template_file)?;
-            debug!("{name:?}: created new creator file: {file:?}");
-            lookup.insert(name.to_string(), file.clone());
-            self.store_creators_lookup(&lookup)?;
-            Ok(file)
-        }
-    }
-
-    pub fn get_creators_file(&self) -> Result<PathBuf> {
-        let lookup_path = self.root_dir.join(".zk").join("creater_lookup.toml");
-        Ok(lookup_path)
-    }
-
-    fn store_creators_lookup(&self, creators_lookup: &HashMap<String, PathBuf>) -> Result<()> {
-        let file_path = self.get_creators_file()?;
-        let text = toml::to_string(creators_lookup)?;
-        std::fs::write(&file_path, text).context(format!("Could not write to {file_path:?}"))
-    }
-
-    fn load_creators_lookup(&self) -> Result<HashMap<String, PathBuf>> {
-        let file_path = self.get_creators_file()?;
-        if file_path.exists() {
-            let text = std::fs::read_to_string(&file_path)
-                .context("Expected {creator_file:?} to exist!")?;
-            toml::from_str::<HashMap<String, PathBuf>>(&text)
-                .context("Failed to parse zk creators file")
-        } else {
-            debug!("creating now lookup table.");
-            Ok(HashMap::new())
-        }
+        let template_file = self
+            .root_dir
+            .join(".zk")
+            .join("templates")
+            .join("creator.md");
+        self.get_zk_file(name, template_file, create_missing)
     }
 }
 
@@ -369,7 +330,7 @@ impl TaskDataHandler for ZkHandler {
             _ => todo!("not implemented: conversion of {task_data:?} to zk."),
         };
         debug!("using template {template_file:?}");
-        let Ok(zk_file) = self.get_zk_file(&title, template_file) else {
+        let Ok(zk_file) = self.get_zk_file(&title, template_file, true) else {
             return Ok(false);
         };
         if !zk_file.exists() {
@@ -429,17 +390,6 @@ impl TaskDataHandler for ZkHandler {
         let res: Vec<String> = res?.into_iter().flatten().collect();
         Ok(res)
     }
-}
-
-pub fn set_zk_creator_file(name: &str, new_file: &PathBuf, root_dir: &Path) -> Result<()> {
-    if !new_file.exists() {
-        bail!("new creator file {new_file:?} does not exist!");
-    }
-    let handler = ZkHandler::new(root_dir.to_path_buf());
-    let mut lookup: HashMap<String, PathBuf> = handler.load_creators_lookup()?;
-    lookup.insert(name.to_string(), new_file.clone());
-    handler.store_creators_lookup(&lookup)?;
-    Ok(())
 }
 
 #[ignore = "Test is hard to get right as the logic relies on the zk lookup file. A proper test would need some restructuring"]
