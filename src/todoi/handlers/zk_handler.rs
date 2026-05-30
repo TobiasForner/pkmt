@@ -171,7 +171,7 @@ impl ZkHandler {
         if tags_success {
             match task_data {
                 TaskData::Sbs(url, author, _, _, desc) => {
-                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "url", std::slice::from_ref(url), file_dir);
                     let success = self.fill_in_creator(pd, "sbs", "source", file_dir);
                     if success.is_err() {
                         return false;
@@ -183,23 +183,23 @@ impl ZkHandler {
                         }
                     }
                     if let Some(desc) = desc {
-                        self.fill_property(pd, "description", &[desc.to_string()], file_dir);
+                        self.fill_property(pd, "description", std::slice::from_ref(desc), file_dir);
                     }
                 }
                 TaskData::Reddit(url, _, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "url", std::slice::from_ref(url), file_dir);
                 }
                 TaskData::Youtube(url, title, channel, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "url", std::slice::from_ref(url), file_dir);
                     let success = self.fill_in_creator(pd, channel, "channel", file_dir);
                     if success.is_err() {
                         println!("Could not fill in creator for {url:?}: {success:?}");
                         return false;
                     }
-                    self.fill_property(pd, "description", &[title.to_string()], file_dir);
+                    self.fill_property(pd, "description", std::slice::from_ref(title), file_dir);
                 }
                 TaskData::YtPlaylist(url, channel, _) => {
-                    self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                    self.fill_property(pd, "url", std::slice::from_ref(url), file_dir);
                     let success = self.fill_in_creator(pd, channel, "channel", file_dir);
                     if success.is_err() {
                         return false;
@@ -211,7 +211,7 @@ impl ZkHandler {
                 TaskData::Interactive(_, url, _, _, sources) => {
                     if let Some(url) = url {
                         debug!("filled in url");
-                        self.fill_property(pd, "url", &[url.to_string()], file_dir);
+                        self.fill_property(pd, "url", std::slice::from_ref(url), file_dir);
                     }
                     sources.iter().for_each(|s| {
                         let _ = self.fill_in_creator(pd, s, "source", file_dir);
