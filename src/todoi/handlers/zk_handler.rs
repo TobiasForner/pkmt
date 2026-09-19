@@ -40,6 +40,7 @@ impl ZkHandler {
         let zk_list_args = [
             "list",
             "--no-input",
+            "-Me",
             "-m",
             &title,
             "-f",
