@@ -18,7 +18,7 @@ use std::{collections::HashSet, path::PathBuf};
 use crate::{
     convert::{convert_file, convert_tree},
     doctor::doctor,
-    todoi::config::Tags,
+    todoi::{config::Tags, handlers::zk_handler::ZkHandler},
 };
 mod document_component;
 use crate::convert::FileInfo;
@@ -91,6 +91,17 @@ enum Commands {
     TodoiConfig {
         #[clap(subcommand)]
         tcfg_command: TCfgCommand,
+    },
+    // get or create creator file
+    Creator {
+        #[arg(required = true)]
+        creator_name: String,
+        #[arg(required = false)]
+        graph_root: Option<PathBuf>,
+        #[arg(short, long, required = false)]
+        mode: Option<TextMode>,
+        #[arg(short, long, required = false)]
+        relative: Option<PathBuf>,
     },
     Doctor {
         #[arg(required = false)]
@@ -312,6 +323,38 @@ fn run() -> Result<()> {
                     std::fs::copy(f, target)?;
                     Ok::<(), anyhow::Error>(())
                 })?;
+            }
+            Ok(())
+        }
+        Some(Commands::Creator {
+            creator_name,
+            graph_root,
+            mode,
+            relative,
+        }) => {
+            if let Some(m) = mode
+                && m != TextMode::Zk
+            {
+                panic!("Only zk is supported!")
+            }
+            let graph_root = if let Some(graph_root) = graph_root {
+                graph_root
+            } else if let Ok(notebook_dir) = std::env::var("ZK_NOTEBOOK_DIR") {
+                PathBuf::from(notebook_dir)
+            } else {
+                bail!(
+                    "Could not determine zk notebook dir. Either specify it via the environment variable 'ZK_NOTEBOOK_DIR' or specify it directly!"
+                );
+            };
+
+            let zk_handler = ZkHandler::new(graph_root);
+            let mut res = zk_handler.get_file_for_creator(&creator_name, true)?;
+            if let Some(relative_to) = relative {
+                res = pathdiff::diff_paths(res, relative_to)
+                    .context("Failed to determine relative paths.")?;
+            }
+            if let Ok(path_text) = res.into_string() {
+                println!("{}", path_text);
             }
             Ok(())
         }
