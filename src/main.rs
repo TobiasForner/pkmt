@@ -309,10 +309,7 @@ fn run() -> Result<()> {
                         let Some(file_name) = file_name.to_str() else {
                             return false;
                         };
-                        if mentioned_files.contains(file_name) {
-                            return true;
-                        }
-                        false
+                        mentioned_files.contains(file_name)
                     })
                     .collect();
 
