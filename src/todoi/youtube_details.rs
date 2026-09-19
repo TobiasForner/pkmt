@@ -5,7 +5,7 @@ use tracing::debug;
 /// returns (title, channel)
 pub fn youtube_details(video_url: &str, api_key: &str) -> Result<(String, String)> {
     let client = reqwest::Client::new();
-    let resolved = client.get(video_url).send();
+    let resolved = client.head(video_url).send();
     let runtime = tokio::runtime::Runtime::new()?;
     let res = runtime.block_on(resolved);
 
