@@ -44,7 +44,7 @@ pub fn main(root_dir: PathBuf, complete_tasks: bool, mode: TextMode) -> Result<(
     let completed_tasks = handle_tasks(&inbox_tasks, &config, mode, &root_dir)?;
 
     if complete_tasks {
-        completed_tasks.iter().for_each(|t| {
+        completed_tasks.par_iter().for_each(|t| {
             let success = todoist_api.close_task(t);
             if success {
                 println!("Marked task '{}' as completed", t.content);
