@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use tracing::Level;
+use tracing::{Level, debug};
 use tracing_subscriber::{
     EnvFilter,
     fmt::{self},
@@ -143,29 +143,37 @@ fn main() {
     }
 }
 
-fn run() -> Result<()> {
-    let cli = Cli::parse();
-
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let base_dirs = directories::BaseDirs::new();
     if let Some(dir) = base_dirs {
         let logging_dir = dir.data_dir().join("pkmt");
+        println!("{:?}", logging_dir);
 
         let file_appender = tracing_appender::rolling::hourly(logging_dir, "pkmt");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         let nb_subs = tracing_subscriber::fmt::layer().with_writer(non_blocking);
-        let filter = tracing_subscriber::filter::Targets::new()
-            .with_target("pkmt", Level::INFO)
-            .with_target("pkmt", Level::DEBUG);
+        //let filter = tracing_subscriber::filter::Targets::new().with_default(Level::DEBUG);
+        let filter = tracing_subscriber::filter::Targets::new().with_target("pkmt", Level::DEBUG);
+
         tracing_subscriber::registry()
             .with(nb_subs)
             .with(filter)
             .init();
+        Some(guard)
     } else {
         tracing_subscriber::registry()
             .with(fmt::layer())
             .with(EnvFilter::from_default_env())
             .init();
+        None
     }
+}
+
+fn run() -> Result<()> {
+    let cli = Cli::parse();
+    let _logging_guard = init_logging();
+
+    debug!("start!");
 
     let res: Result<()> = match cli.command {
         Some(Commands::Todoi {
