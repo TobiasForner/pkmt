@@ -158,12 +158,10 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let base_dirs = directories::BaseDirs::new();
     if let Some(dir) = base_dirs {
         let logging_dir = dir.data_dir().join("pkmt");
-        println!("{:?}", logging_dir);
 
         let file_appender = tracing_appender::rolling::hourly(logging_dir, "pkmt");
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         let nb_subs = tracing_subscriber::fmt::layer().with_writer(non_blocking);
-        //let filter = tracing_subscriber::filter::Targets::new().with_default(Level::DEBUG);
         let filter = tracing_subscriber::filter::Targets::new().with_target("pkmt", Level::DEBUG);
 
         tracing_subscriber::registry()
