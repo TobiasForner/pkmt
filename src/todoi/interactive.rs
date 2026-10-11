@@ -55,10 +55,10 @@ impl InteractiveState {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 self.choices_pos = self.choices_pos.saturating_sub(1);
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 self.choices_pos = self
                     .choices_pos
                     .saturating_add(1)
